@@ -27,12 +27,12 @@ var defaults = {
   DB_CONNECTION_ID: pgData.DB_CONNECTION_ID>=0 ? pgData.DB_CONNECTION_ID : 1
 }
 
-function TransactionDBConnection(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,pgClient){
+function TransactionDBConnection(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client){
   this.setConnectionParams(databaseName,databaseAddress,databasePassword,databasePort,databaseUser);
 
-  this.pgClientDefaults = _.cloneDeep(defaults);
-  this.pgClient = pgClient;
-  this.pgClient.defaults = this.pgClientDefaults;
+  this.clientDefaults = _.cloneDeep(defaults);
+  this.Client = Client;
+  this.Client.defaults = this.clientDefaults;
   this.clientConnectionID = 1
 }
 
@@ -69,7 +69,7 @@ TransactionDBConnection.prototype.setDatabasePassword = function(dbPasswd){
 TransactionDBConnection.prototype.PGNewClientAsync = function(){
   if( !this.databaseName ){    console.error( new Error( "TransactionDBConnection.databaseName not assigned -> " + this.databaseName + ", typeof -> " + (typeof this.databaseName) ) ); }
   if( !this.databaseAddress ){ console.error( new Error( "TransactionDBConnection.databaseAddress not assigned -> " + this.databaseAddress + ", typeof -> " + (typeof this.databaseAddress) ) ); }
-  console.log(this.databaseName,"PG Client Async Size = " + this.pgClient.defaults.poolSize + " :  DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
+  console.log(this.databaseName,"PG Client Async Size = " + this.Client.defaults.poolSize + " :  DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
 }
 
 /** Generate and return a connection string using database name and address **/
@@ -97,12 +97,12 @@ TransactionDBConnection.prototype.query = function(queryIn, paramsIn, callback){
   async.waterfall([
       function ifNotConnectedConnect(wcb){
         var isConnected = false
-        try { isConnected = self.pgClient.native.pq.connected == true } catch(e){}
+        try { isConnected = self.Client.native.pq.connected == true } catch(e){}
         if( isConnected ) return wcb();
-        self.pgClient.connect.bind(self.pgClient)(wcb)
+        self.Client.connect.bind(self.Client)(wcb)
       },
       function queryCall(wcb){
-        self.pgClient.query.bind(self.pgClient)(query, params, function(err, result) {
+        self.Client.query.bind(self.Client)(query, params, function(err, result) {
           if(err){ try{  err.message = err.message + "\r" + query;  } catch(e){ console.error(e.stack) } }
           self.logQuery.bind(self)(startTime, query, params)
           callback(err, result);
@@ -119,7 +119,7 @@ TransactionDBConnection.prototype.querySync = function(queryIn, paramsIn, callba
 
 /** Wrapper to end database connection **/
 TransactionDBConnection.prototype.end = function(){
-  try { this.pgClient.end(); } catch(e){ /*console.error(e.stack);*/ } // Force log out of async PG clients
+  try { this.Client.end(); } catch(e){ /*console.error(e.stack);*/ } // Force log out of async PG clients
 
 }
 
@@ -135,7 +135,7 @@ TransactionDBConnection.prototype.logoutSyncClient = function(){
 }
 
 TransactionDBConnection.prototype.logoutAsyncClient = function(){
-  try { this.pgClient.end(); } catch(e){  } /* If PGSync Client is kill */
+  try { this.Client.end(); } catch(e){  } /* If PGSync Client is kill */
 }
 
 /** Async Client has died **/

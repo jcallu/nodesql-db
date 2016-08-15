@@ -29,7 +29,7 @@ var SYNC_LOGOUT_TIMEOUT = config.NODESQLDB_POOL_IDLE_TIMEOUT;
 function DBConnection(databaseName,databaseAddress,databasePassword,databasePort,databaseUser){
   this.setConnectionParams(databaseName,databaseAddress,databasePassword,databasePort,databaseUser);
   this.pgClientSyncIntervalTimer = 0;
-  this.pgClientDefaults = _.cloneDeep(defaults);
+  this.clientDefaults = _.cloneDeep(defaults);
   this.clientConnectionID = ( parseInt(pgData.DB_CONNECTION_ID) >= 1 ? parseInt(pgData.DB_CONNECTION_ID) : 1 );
 }
 
