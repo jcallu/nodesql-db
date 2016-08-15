@@ -122,7 +122,7 @@ DBConnection.prototype.ClientNewPool = function(){
     connectionsMap.pool['"'+dbConnectionString+'"'] = true;
     newClientPool()
   }
-  if(  LOG_CONNECTIONS != false ) console.log(this.databaseName," Client Async Size = " + pg.defaults.poolSize + " :  DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
+  if(  LOG_CONNECTIONS != false ) console.log(this.databaseProtocol,this.databaseName,"Pool Size = " + pg.defaults.poolSize + " - DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
 }
 
 
@@ -183,7 +183,7 @@ DBConnection.prototype.NewClient = function(dbConnectionString){
     this.ClientReaper.bind(this)()
     newClient(dbConnectionString);
   }
-  if( LOG_CONNECTIONS != false )   console.log(this.databaseName,"PG Client Sync Size = "+pgSync.defaults.poolSize+" :  DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
+  if( LOG_CONNECTIONS != false )   console.log(this.databaseProtocol,this.databaseName,"Client Size = "+pgSync.defaults.poolSize+" - DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
 }
 
 /** Query using the Synchronous PG Client **
