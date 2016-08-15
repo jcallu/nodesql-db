@@ -180,7 +180,7 @@ function externalJoinHelper(obj,schema){
 AbstractTable.prototype.join = function(tablesToJoinOnObjs){
   var self = this;
   var DB = self.abstractTableDB;
-  var CACHE_KEY = SchemaFilename(self.databaseName,self.databaseAddress,self.databasePort,self.databaseUser);
+  var CACHE_KEY = SchemaFilename(self.databaseName,self.databaseAddress,self.databasePort,self.databaseUser,self.databaseProtocol);
   var rawSql = typeof tablesToJoinOnObjs === 'string' ? tablesToJoinOnObjs : null;
   var joinSQL = '';
   if( rawSql){
