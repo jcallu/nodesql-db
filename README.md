@@ -18,10 +18,10 @@ use a connection string:
     $  node app.js
 app.js ->
 
-        var pgpassword = process.env.PGPASSWD || '';
-        var pgConnStr = "postgresql://postgres:"+pgpassword+"@127.0.0.1:5432/mydb";
-        // or var pgConnStr = "mysql://root:"+pgpassword+"@127.0.0.1:3306/mydb";
-        var mydb = new db(pgConnStr);
+        var password =  ''; // or 'my_password_is_aight'
+        var connStr = "postgresql://postgres:"+password+"@127.0.0.1:5432/mydb";
+        // or var connStr = "mysql://root:"+password+"@127.0.0.1:3306/mydb";
+        var mydb = new db(connStr);
 
 
 
