@@ -1,0 +1,53 @@
+{
+  "name": "nodesql-db",
+  "version": "0.0.1",
+  "description": "Node.js for Postgres, Mysql, Memsql",
+  "engines": {
+    "node": "4.4.x"
+  },
+  "scripts": {
+    "test": "./test.js"
+  },
+  "contributors": [
+    "Jacinto Callu"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "author": "Jacinto Callu",
+  "dependencies": {
+    "async": "^2.0.0-rc.3",
+    "inflection": "^1.10.0",
+    "lodash": "^4.11.2",
+    "moment-timezone": "^0.5.4",
+    "mysql": "^2.11.1",
+    "pg": "^4.5.5",
+    "pg-native": "^1.10.0",
+    "q": "^1.4.1",
+    "sql-parser": "^0.5.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@bitbucket.org/jcallu/node-sql-db.git"
+  },
+  "keywords": [
+    "postgresql",
+    "postgres transaction",
+    "postgres promise",
+    "psql promise",
+    "postgresql",
+    "psql",
+    "database",
+    "pool",
+    "node",
+    "sql"
+  ],
+  "license": "ISC",
+  "homepage": "https://bitbucket.org/jcallu/nodesql-db#readme",
+  "main": "index.js",
+  "devDependencies": {},
+  "directories": {
+    "test": "test"
+  }
+}
