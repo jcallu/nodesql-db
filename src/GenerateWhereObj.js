@@ -1,6 +1,8 @@
 'use strict'
 var utilityFunctions = require('./utils.js')
 var _ = require('lodash')
+var getTableSchemaDataMap = require('./getTableSchemaDataMap.js')
+
 function GenerateWhereObj(tableName,tableSchema,whereObjOrRawSQL,AND){
   var isRawSQL = typeof whereObjOrRawSQL === 'string' ? true : false;
   var where_CLAUSE = '';
