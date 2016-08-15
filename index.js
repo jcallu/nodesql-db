@@ -3,7 +3,6 @@ var AbstractTable = require(__dirname+'/src/AbstractTable.js');
 var ConnectionUrlParser = require(__dirname+'/src/ConnectionUrlParser.js');
 var SchemaFilename = require(__dirname+'/src/SchemaFilename.js')
 var util = require('util');
-var _  = require('lodash')
 var Q = require('q')
 var Promise = function dbPromise(){ var q = Q.defer(); q.resolve(undefined); return q.promise; };
 /* Postgres Connection, Schema Caching */
@@ -40,30 +39,32 @@ module.exports = function(connStrOrObj){
   }
   switch (databaseProtocol){
     case 'postgresql':
-      var connectionClient = new PostgresqlConnectionClient(databaseName,databaseAddress,databasePassword,databasePort,databaseUser)
-      var schemaSet = PostgresqlDatabaseSchemaCache(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,connectionClient,databaseProtocol);
+      var Client = new PostgresqlConnectionClient(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol)
+      var schemaSet = PostgresqlDatabaseSchemaCache(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol);
       var schemaKey = SchemaFilename(databaseName,databaseAddress,databasePort,databaseUser,databaseProtocol)
       var schema = schemaSet || process[schemaKey] || {};
       for( var tablename in schema ){
-        this[tablename] = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,connectionClient,databaseProtocol,PostgresqlDatabaseSchemaCache);
+        this[tablename] = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache);
       }
-      function Transaction(){ PostgresqlTransaction.call(this,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,connectionClient,databaseProtocol,PostgresqlDatabaseSchemaCache); }
-      util.inherits(Transaction,PostgresqlTransaction);
-      this.Transaction = Transaction;
+      function TransactionBoundary(){
+        return PostgresqlTransaction.call(null,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache,AbstractTable);
+      }
+      util.inherits(TransactionBoundary,PostgresqlTransaction);
+      this.Transaction = function Transaction(){ return new TransactionBoundary() }
       this.Promise = Promise
-      this.Client = connectionClient
+      this.Client = Client
       break;
     case 'mysql':
     case 'memsql':
-      var connectionClient = new MysqlConnectionClient(databaseName,databaseAddress,databasePassword,databasePort,databaseUser);
+      var Client = new MysqlConnectionClient(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol);
       var schemaKey = SchemaFilename(databaseName,databaseAddress,databasePort,databaseUser,databaseProtocol)
-      var schemaSet = MysqlDatabaseSchemaCache(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,connectionClient,databaseProtocol);
+      var schemaSet = MysqlDatabaseSchemaCache(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol);
       var schema = schemaSet || process[schemaKey] || {};
       for( var tablename in schema ){
-        this[tablename] = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,connectionClient,databaseProtocol,MysqlDatabaseSchemaCache);
+        this[tablename] = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,MysqlDatabaseSchemaCache);
       }
       this.Promise = Promise
-      this.Client = connectionClient
+      this.Client = Client
       break;
     default:
       break;

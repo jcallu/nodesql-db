@@ -8,7 +8,7 @@ var Q = require('q');
 var _ = require('lodash');
 var async = require('async')
 /* TheVGP Modules */
-
+var logQuery = require('../logQuery.js')
 var config = require('../config.js')
 var moment = require('moment-timezone')
 /** Constants **/
@@ -20,16 +20,15 @@ var IS_DEV_ENV =  config.IS_DEV_ENV
 
 var pgData = {}
 var defaults = {
-  reapIntervalMillis: config.NODESQLDB_HOME_REAP_INTERVAL_MILLIS ,
-  poolIdleTimeout: config.NODESQLDB_HOME_POOL_IDLE_TIMEOUT ,
-  poolSize: config.PG_POOL_SIZE,
+  reapIntervalMillis: config.NODESQLDB_REAP_INTERVAL_MILLIS ,
+  poolIdleTimeout: config.NODESQLDB_POOL_IDLE_TIMEOUT ,
+  poolSize: 1,
   parseInt8: parseInt,
-  DB_CONNECTION_ID: pgData.DB_CONNECTION_ID>=0 ? pgData.DB_CONNECTION_ID : 1
+  dbConnectionId: pgData.dbConnectionId>=0 ? pgData.dbConnectionId : 1
 }
 
-function TransactionDBConnection(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client){
-  this.setConnectionParams(databaseName,databaseAddress,databasePassword,databasePort,databaseUser);
-
+function TransactionDBConnection(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol){
+  this.setConnectionParams.bind(this)(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol);
   this.clientDefaults = _.cloneDeep(defaults);
   this.Client = Client;
   this.Client.defaults = this.clientDefaults;
@@ -37,14 +36,22 @@ function TransactionDBConnection(databaseName,databaseAddress,databasePassword,d
 }
 
 
-TransactionDBConnection.prototype.setConnectionParams = function(databaseName,databaseAddress,databasePassword,databasePort,databaseUser){
-  this.setDatabaseName(databaseName);
-  this.setDatabaseAddress(databaseAddress);
-  this.setDatabasePort(databasePort);
-  this.setDatabaseUser(databaseUser);
-  this.setDatabasePassword(databasePassword);
+TransactionDBConnection.prototype.setConnectionParams = function(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol){
+  this.setDatabaseName.bind(this)(databaseName);
+  this.setDatabaseAddress.bind(this)(databaseAddress);
+  this.setDatabasePort.bind(this)(databasePort);
+  this.setDatabaseUser.bind(this)(databaseUser);
+  this.setDatabasePassword.bind(this)(databasePassword);
+  this.setDatabaseProtocol.bind(this)(databaseProtocol);
 }
 
+TransactionDBConnection.prototype.setDatabaseProtocol = function(dbProtocol){
+  if( typeof dbProtocol == 'undefined' ) {
+    var e = new Error("unrecognized protocol -> "+dbProtocol)
+    throw e
+  }
+  this.databaseProtocol = dbProtocol || 'postgresql'
+}
 TransactionDBConnection.prototype.setDatabaseName = function(dbName){
   this.databaseName = dbName || ''
 }
@@ -66,10 +73,10 @@ TransactionDBConnection.prototype.setDatabasePassword = function(dbPasswd){
 }
 
 /** Setup a new Asynchronous PG Client **/
-TransactionDBConnection.prototype.PGNewClientAsync = function(){
+TransactionDBConnection.prototype.ClientNewPool = function(){
   if( !this.databaseName ){    console.error( new Error( "TransactionDBConnection.databaseName not assigned -> " + this.databaseName + ", typeof -> " + (typeof this.databaseName) ) ); }
   if( !this.databaseAddress ){ console.error( new Error( "TransactionDBConnection.databaseAddress not assigned -> " + this.databaseAddress + ", typeof -> " + (typeof this.databaseAddress) ) ); }
-  console.log(this.databaseName,"PG Client Async Size = " + this.Client.defaults.poolSize + " :  DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
+  console.log(this.databaseProtocol,this.databaseName,"Pool Size = " + this.Client.defaults.poolSize + " : DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
 }
 
 /** Generate and return a connection string using database name and address **/
@@ -113,8 +120,7 @@ TransactionDBConnection.prototype.query = function(queryIn, paramsIn, callback){
 
 TransactionDBConnection.prototype.querySync = function(queryIn, paramsIn, callback){
   var err = new Error("transaction querySync not supported")
-  // callback(err)
-  throw err
+  callback(err)
 }
 
 /** Wrapper to end database connection **/
@@ -124,62 +130,27 @@ TransactionDBConnection.prototype.end = function(){
 }
 
 /** Force Sync Clients to die after certain time **/
-TransactionDBConnection.prototype.timeoutLogoutSyncClient = function(){
+TransactionDBConnection.prototype.ClientReaper = function(){
 
 }
 
 /** Force Sync Client to die **/
-TransactionDBConnection.prototype.logoutSyncClient = function(){
+TransactionDBConnection.prototype.ClientEnd = function(){
   try {  } catch(e){  } /* If PGSync Client is alive and well destory it. Feel the power of the darkside!!! */
 
 }
 
-TransactionDBConnection.prototype.logoutAsyncClient = function(){
+TransactionDBConnection.prototype.ClientPoolEnd = function(){
   try { this.Client.end(); } catch(e){  } /* If PGSync Client is kill */
 }
 
 /** Async Client has died **/
-TransactionDBConnection.prototype.dbClientError = function(err,done,callback){
+TransactionDBConnection.prototype.poolConnectionFailure = function(err,done,callback){
   done = typeof done === 'function' ? done : function(){}; // make sure client can be killed without any syntax errors.
   callback = typeof callback == 'function' ? callback : function(){};
   err = err ? ( err instanceof Error ? err : new Error(err) ) : new Error(); // make sure error is an Error instance.
   return callback(err);
 }
-
-/** Helper Function to log timing of query functions **/
-function logQueryPrint(message,query,valuesQuery,seconds,milliseconds){
-  console.log(message + "Query took: %d:%ds  => " + query + valuesQuery, seconds, milliseconds); console.log();
-}
-
-var monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-var momentRegion = config.TIMEZONE;
-function getTimestamp(){
-  var date = new Date();
-  var dateS = date.toISOString();
-  var momentO = moment(dateS).tz(momentRegion);
-  var momentS = momentO.format('DD, YYYY hh:mm:ss');
-  var dateM = new Date(momentO.format());
-  return monthNames[dateM.getMonth()] + " " + momentS + " (PST)"
-}
-
-
-function logQuery(startTime, query, values){
-  if( !query ) return console.log("No query passed in",query,values)
-  var clientConnectionID = this.clientConnectionID >=0 ? this.clientConnectionID : 'null';
-  if( ! ( DB_LOG_ON || DB_LOG_SLOW_QUERIES_ON   ) ) return;
-  var t = process.hrtime(startTime);
-  var valuesQuery = values instanceof Array && values.length > 0 ? (" , queryParams => [" + values + "]" ) : "";
-  var seconds = t[0];
-  var milliseconds = t[1];
-  var isSlowTiming = ( seconds + (milliseconds/1e9) ) >= 1;
-  var message = "Connection "+this.databaseAddress+" ID: "+clientConnectionID+" - "+getTimestamp()+" - "
-  if (  ( DB_LOG_SLOW_QUERIES_ON ||  IS_DEV_ENV ) && isSlowTiming  ){
-    message = "Connection "+this.databaseAddress+" ID: "+clientConnectionID+" SLOW!! - "+getTimestamp()+" - "
-    return logQueryPrint(message,query,valuesQuery,seconds,milliseconds)
-  }
-  if ( DB_LOG_ON ){ return logQueryPrint(message,query,valuesQuery,seconds,milliseconds) }
-};
-
 TransactionDBConnection.prototype.logQuery = logQuery
 
 module.exports = TransactionDBConnection;

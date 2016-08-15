@@ -1,79 +1,77 @@
 var Q = require('q');
-var AbstractTable = require('../AbstractTable.js');
 var _ = require('lodash');
-var PGNativeAsync = require('pg').native
+var PGClient = require('pg').native
 var SchemaFilename = require('../SchemaFilename.js')
-var PostgresqlDatabaseSchemaCache = require('./PostgresqlDatabaseSchemaCache.js')
-var ConnectionClient = require('./PostgresqlTransactionConnectionClient.js')
+var PostgresqlTransactionConnectionClient = require('./PostgresqlTransactionConnectionClient.js')
+var AbstractTable = require('../AbstractTable.js')
 
-function Transaction (databaseName,databaseAddress,databasePassword,databasePort,databaseUser,dbConnection,databaseAdapter){
-  var fsSchemaCacheKey = SchemaFilename(databaseName,databaseAddress,databasePort,databaseUser,databaseAdapter)
-  var schemaSet = PostgresqlDatabaseSchemaCache(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,dbConnection,databaseAdapter);
+function Transaction (databaseName,databaseAddress,databasePassword,databasePort,databaseUser,dbConnection,databaseProtocol, PostgresqlDatabaseSchemaCache){
+  var fsSchemaCacheKey = SchemaFilename(databaseName,databaseAddress,databasePort,databaseUser,databaseProtocol)
+  var schemaSet = PostgresqlDatabaseSchemaCache(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,dbConnection,databaseProtocol);
+  // console.log("schemaSet",Object.keys(schemaSet).length,fsSchemaCacheKey)
   var tableSchema =  schemaSet || process[fsSchemaCacheKey] || {};
   if( Object.keys(tableSchema).length == 0 ){
     throw Error("Schema "+databaseName+" not initialized");
   }
-  this.TransactionParams = {}
-  this.TransactionParams.databaseName = databaseName;
-  this.TransactionParams.databaseAddress = databaseAddress;
-  this.TransactionParams.databasePassword = databasePassword
-  this.TransactionParams.databasePort = databasePort;
-  this.TransactionParams.databaseUser = databaseUser;
-  this.TransactionParams.dbConnection = dbConnection;
-  this.TransactionParams.dbConnectionString = dbConnection.getConnectionString()
-  var client = new PGNativeAsync.Client( this.TransactionParams.dbConnectionString );
-  var dbConnectionClient = new ConnectionClient(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,client)
-  var tables = {};
+  this.databaseName = databaseName;
+  this.databaseAddress = databaseAddress;
+  this.databasePassword = databasePassword
+  this.databasePort = databasePort;
+  this.databaseUser = databaseUser;
+
+  var dbConnectionString = dbConnection.getConnectionString.bind(dbConnection)()
+
+  var TransactionClient = new PGClient.Client( dbConnectionString );
+  var Client = new PostgresqlTransactionConnectionClient(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,TransactionClient,databaseProtocol)
+
+  // console.log("Client",Client)
+
+  this.RolledBack = false;
+  this.Closed = false;
+  this.Begun = false
+  this.Client = Client;
+  this.Promise = function dbPromise(){ return Q.fcall(function(){ return; }); };
+
   _.forEach(tableSchema,function(value,tablename){
-    tables[tablename] = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,dbConnectionClient,PostgresqlDatabaseSchemaCache);
+    var table = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache);
+    this[tablename] = table;
   });
-  this.Q = Q;
-  this.TransactionParams.rolledback = false;
-  this.TransactionParams.closed = false;
-  this.TransactionParams.begun = false
-  this.Tables = {}
-  for( var table in tables ){
-    this.Tables[table] = tables[table];
-  }
-  this.PGClient = transactionDBConnection;
+  return this;
 }
 
-Transaction.prototype.getClient = function(){
-  return this.PGClient;
+Transaction.prototype.GetClient = function(){
+  return this.Client;
 };
 
-Transaction.prototype.getDB = function(){
-  return this.TransactionParams.databaseName;
+Transaction.prototype.GetDB = function(){
+  return this.databaseName;
 };
 
 
-Transaction.prototype.begin = function(){
+Transaction.prototype.Begin = function(){
 
   // var s = process.hrtime();
   var q = Q.defer();
   var self = this;
 
   var beginQuery = "BEGIN;";
-  self.PGClient.query(beginQuery,function(err,ret){
+  self.Client.query.bind(self.Client)(beginQuery,function(err,ret){
     // console.log("BEGIN",err,ret)
     if(err) {
-      self.rollback();
+      self.Rollback.bind(self)();
     } else {
-      self.TransactionParams.begun = true;
+      self.Begun = true;
       q.resolve();
     }
   });
   return q.promise;
-};
-Transaction.prototype.promise = function(){
-  return Q.fcall(function(){ return; });
 };
 
 Transaction.prototype.boundary = function(promisedStep){
   var self = this;
   var q = Q.defer();
   if( !( promisedStep instanceof Object ) && promisedStep.state !== 'pending' ) {
-    self.rollback().fail(function(err){
+    self.Rollback.bind(self)().fail(function(err){
       q.reject(new Error("Boundary function was not a promise"));
     });
   } else {
@@ -81,7 +79,7 @@ Transaction.prototype.boundary = function(promisedStep){
       q.resolve(ret);
     })
     .fail(function(err){
-      self.rollback(err).fail(function(err){
+      self.Rollback.bind(self)(err).fail(function(err){
         q.reject(err);
       });
     }).done();
@@ -90,18 +88,18 @@ Transaction.prototype.boundary = function(promisedStep){
   return q.promise;
 };
 
-Transaction.prototype.commit = function(){
+Transaction.prototype.Commit = function(){
   // var s = process.hrtime();
   var self = this;
   var q = Q.defer();
   var commitQuery = "COMMIT;";
-  self.PGClient.query(commitQuery,function(err,ret){
-    self.PGClient.logQuery(s,commitQuery);
+  self.Client.query(commitQuery,function(err,ret){
+    self.Client.logQuery(s,commitQuery);
     if(err){
-      self.rollback(err);
+      self.Rollback(err);
     } else {
-      self.PGClient.end();
-      self.TransactionParams.closed = true;
+      self.Client.end();
+      self.Closed = true;
       q.resolve(ret);
     }
 
@@ -113,18 +111,22 @@ Transaction.prototype.commit = function(){
 var ROLLBACK_MSG = "<~ Transaction Client Closed And Rolled Back";
 
 
-Transaction.prototype.rollback = function(err){
+Transaction.prototype.Rollback = function(err){
   var self = this;
 
   // var s = process.hrtime();
   var q = Q.defer();
   var rollbackQuery = "ROLLBACK;";
 
-  if( self.TransactionParams.rolledback == false ) {
-    self.PGClient.query(rollbackQuery,function(err2,ret){
-      self.TransactionParams.rolledback = true;
-      self.PGClient.end();
-      self.TransactionParams.closed = true;
+  if( self.RolledBack == false ) {
+    self.Client.query.bind(self.Client)(rollbackQuery,function(err2,ret){
+
+      try {
+        self.Client.end();
+      } catch(e){
+      }
+      self.RolledBack = true;
+      self.Closed = true;
       if(err) {
         err.message += " FAILURE: Transaction ERROR " + ROLLBACK_MSG;
       }
@@ -140,11 +142,10 @@ Transaction.prototype.rollback = function(err){
     });
   } else {
     try {
-      self.PGClient.end();
-      self.TransactionParams.closed = true;
+      self.Client.end();
     } catch(e){
-
     }
+    self.Closed = true;
     q.reject(null);
   }
   return q.promise;

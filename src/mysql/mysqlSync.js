@@ -3,7 +3,7 @@ var spawnSync = require('child_process').spawnSync;
 var LexerTokenize = require('sql-parser').lexer.tokenize
 var _ = require('lodash')
 var fs = require('fs')
-
+var syncOutputDataFile = __dirname+"/output/sync.log"
 
 var mysqlSync = {
   connectionString: '',
@@ -60,8 +60,8 @@ var mysqlSync = {
   querySync: function(query){
     var ret = {};
     try {
-      fs.writeFileSync('./output/out.log','')
-      var output = fs.openSync('./output/out.log', 'w+');
+      fs.writeFileSync(syncOutputDataFile,'')
+      var output = fs.openSync(syncOutputDataFile, 'w+');
       ret = spawnSync("node",[__dirname+"/mysqlCliClient.js",this.connectionString,query],{ env: process.env, maxBuffer: 1e9, stdio: [0,output,'pipe'] })
     } catch(e){
       ret = {error: e}
@@ -71,8 +71,8 @@ var mysqlSync = {
     var results = { rows: [] }
 
     try{
-      var stdout = fs.readFileSync('./output/out.log','utf8')
-      fs.writeFileSync('./output/out.log','')
+      var stdout = fs.readFileSync(syncOutputDataFile,'utf8')
+      fs.writeFileSync(syncOutputDataFile,'')
       results = JSON.parse(stdout);
     } catch(e){
       error = error || e;

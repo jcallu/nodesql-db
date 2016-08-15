@@ -1,6 +1,8 @@
 var NODESQLDB_HOME = __dirname+'/../'
 var fs = require('fs');
 var _ = require('lodash');
+var config = require('../config.js')
+var NODE_ENV = config.NODE_ENV
 var SchemaFilename = require('../SchemaFilename.js')
 function isCacheNotSet(cacheKey){
   if( typeof process[cacheKey] == 'undefined' ) return true;

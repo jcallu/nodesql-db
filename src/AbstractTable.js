@@ -1,3 +1,4 @@
+'use strict'
 var NODESQLDB_HOME = __dirname
 var _ = require('lodash');
 var async = require('async');
@@ -8,202 +9,54 @@ var inflection = require('inflection');
 var SchemaFilename = require('./SchemaFilename.js')
 var NODE_ENV = config.NODE_ENV;
 var DB_LOG = config.DB_LOG_ON;
-var utilityFunctions = {
-  console: { asyncLog: function(){
-      var args = _.values(arguments);
-      var tm = setTimeout(function(){
-        console.log.apply(this,args)
-      },10)
-      tm.unref();
-    }
-  },
-  escapeApostrophes: function(str){
-    if( typeof str != 'string' ){
-      throw "not a string"
-    }
-    return str.replace(/\'/gm,"''")
-  }
-}
-var abstractDBLog = NODE_ENV !== 'production' && DB_LOG ? utilityFunctions.console.asyncLog : function(){};
+var utilityFunctions = require('./utils.js')
+var debugLog = NODE_ENV !== 'production' && DB_LOG ? utilityFunctions.console.asyncLog : function(){};
+var EXCEPTIONS = require('./Exceptions.js')
+var GenerateWhereObj = require('./GenerateWhereObj.js')
 
 
 
-
-function GenerateWhereObj(tableName,tableSchema,whereObjOrRawSQL,AND){
-  var isRawSQL = typeof whereObjOrRawSQL === 'string' ? true : false;
-  var where_CLAUSE = '';
-  try {
-    if( isRawSQL ){
-     where_CLAUSE = '';
-      var rawSQLStr = whereObjOrRawSQL.toLowerCase().trim().replace(/(\s{1,})/gm," ").trim();
-      // console.log("rawSQLStr ->",rawSQLStr)
-      var isNotWhereAddOn = rawSQLStr.indexOf("WHERE TRUE") === -1;
-      if ( AND ){
-        if( rawSQLStr.indexOf("and") !== 0 ){
-          where_CLAUSE += " AND " + whereObjOrRawSQL + " ";
-        } else {
-          where_CLAUSE += " " + whereObjOrRawSQL + " ";
-        }
-      } else {
-        if(  rawSQLStr.indexOf("where true") >= 0 && isNotWhereAddOn ){
-          where_CLAUSE += " " + whereObjOrRawSQL + " "; // Syntax Sugar query expected here "WHERE TRUE blah and blah"
-          //abstractDBLog("1st str whereParam =>",whereObjOrRawSQL);
-        }
-        else if (  rawSQLStr.indexOf("and") === -1 && rawSQLStr.indexOf('where') === -1 && rawSQLStr && isNotWhereAddOn ){
-         where_CLAUSE += " WHERE TRUE AND "+ whereObjOrRawSQL + " "; //Where starts on first condition without "AND" insensitive case
-          //abstractDBLog("2nd str  whereParam =>",whereObjOrRawSQL);
-        }
-        else if ( rawSQLStr.indexOf("and") === 0 && isNotWhereAddOn  ) {
-         where_CLAUSE += " WHERE TRUE "+whereObjOrRawSQL + " "; //Starts with "AND" insensitive case
-          //abstractDBLog("3rd str  whereParam =>",whereObjOrRawSQL);
-        }
-        else if (  rawSQLStr && isNotWhereAddOn ) {
-         where_CLAUSE += " WHERE "+whereObjOrRawSQL+ " "; // ANY corner case not handled like passing white space
-          //abstractDBLog("4th str  whereParam =>",whereObjOrRawSQL);
-        }
-        else if ( !isNotWhereAddOn && rawSQLStr.indexOf("and") !== 0 ){
-         where_CLAUSE += " AND " + whereObjOrRawSQL + " ";
-          //abstractDBLog("5th str  whereParam =>",whereObjOrRawSQL);
-        }
-        else {
-         where_CLAUSE += " "+whereObjOrRawSQL+" ";
-          //abstractDBLog("6th str  whereParam =>",whereObjOrRawSQL);
-        }
-      }
-    }
-    else if ( whereObjOrRawSQL instanceof Object ){
-      var schemaData = getTableSchemaDataMap(whereObjOrRawSQL,tableSchema)
-      var keys = schemaData.columnNames;
-      var paramsData = schemaData.paramsData;
-      var columnNamesData = schemaData.columnDataMap
-      where_CLAUSE = !AND ? " WHERE TRUE " : ''
-      _.forEach(whereObjOrRawSQL, function(value,key){
-        var paramData = columnNamesData[key] || {};
-        switch(true){
-          case ( key === 'raw_postgresql' || key === 'raw_sql' ):
-            if( typeof value === 'string' ){
-                where_CLAUSE += " " + value + " ";
-            } else {
-              console.error(new Error(tableName+ " "+key+ " not sql where clause ").stack)
-            }
-            break;
-          case ( value instanceof Object && typeof value.condition === 'string' ):
-            where_CLAUSE += " AND " + key + " "+ value.condition + " ";
-            break;
-          case _.isNull(value) || _.isUndefined(value):
-            where_CLAUSE += " AND " + key + " IS NULL ";
-            break;
-          case ( paramData.js_type == 'number' ):
-            if( !isNaN( parseInt(value) ) ){
-              where_CLAUSE += " AND " + key + " = "+value+" ";
-            } else {
-              console.error(new Error(tableName+ " "+key+ " invalid "+paramData.js_type+" "+value).stack)
-            }
-            break;
-          case ( paramData.js_type == 'date'  ):
-            if( (value instanceof Date) && value !== 'Invalid Date' ){
-              where_CLAUSE += " AND "+ key +" = '"+ value.toISOString()+"'::DATE ";
-            } else if ( typeof value == 'string' && new Date(value) !== 'Invalid Date' ) {
-              value = new Date(value)
-              where_CLAUSE += " AND "+ key +" = '"+ value.toISOString()+"'::DATE ";
-            } else {
-              console.error(new Error(tableName+ " "+key+ " invalid "+paramData.js_type+" "+value).stack)
-            }
-          case ( paramData.js_type == 'time'  ):
-            if( (value instanceof Date) && value !== 'Invalid Date' ){
-              where_CLAUSE += " AND "+ key +" = '"+ value.toISOString()+"'::TIMESTAMP ";
-            } else if ( typeof value == 'string' && new Date(value) !== 'Invalid Date' ) {
-              value = new Date(value)
-              where_CLAUSE += " AND "+ key +" = '"+ value.toISOString()+"'::TIMESTAMP ";
-            } else {
-              console.error(new Error(tableName+ " "+key+ " invalid "+paramData.js_type+" "+value).stack)
-            }
-            break;
-          case ( paramData.js_type == 'object'  ):
-            if( (value instanceof Object || value instanceof Array) ){
-              value = JSON.stringify(value)
-              where_CLAUSE += " AND " + key + " = '" + utilityFunctions.escapeApostrophes(value) + "' ";
-            } else {
-              console.error(new Error(tableName+ " "+key+ " not an "+paramData.js_type+" "+value).stack)
-            }
-            break;
-          case ( paramData.js_type == 'string'  ):
-            if( typeof value === 'string' ){
-              where_CLAUSE += " AND " + key + " = '" + utilityFunctions.escapeApostrophes(value) + "' ";
-            }
-            else if ( value != null && typeof value !== 'undefined' && typeof value.toString === 'function' && value.toString() ){
-              where_CLAUSE += " AND " + key + " = '" + utilityFunctions.escapeApostrophes(value.toString()) + "' ";
-            }
-            else {
-              console.error(new Error(tableName+ " "+key+ " not a "+paramData.js_type+" "+value).stack)
-            }
-            break;
-          default:
-            try {
-              value = value.toString();
-            } catch(e){
-              console.error(e.stack);
-              value = '';
-            }
-            where_CLAUSE += " AND " + key + " = '" + utilityFunctions.escapeApostrophes(value) + "' ";
-            break;
-        }
-      });
-    }
-  } catch(e){
-    console.error(e.stack);
-  }
-  this.abstractTableWhere = where_CLAUSE;
-}
-
-GenerateWhereObj.prototype.getWhere = function(){
-  return this.abstractTableWhere;
-};
-
-var EXCEPTIONS = {
-  postgresql: {
-    "DUPLICATE_KEY_VIOLATION": "23505"
-  },
-  mysql: {},
-  memsql: {}
-}
-
-var AbstractTable = function(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,dbConnection,dbAdapter,createVirtualSchema){
+var AbstractTable = function(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,setSqlSchemaCache){
   this.abstractTableDb = databaseName;
-  this.sqlProtocol = dbAdapter
+  this.databaseProtocol = databaseProtocol
   var DB = this.abstractTableDb.toUpperCase();
-  var CACHE_KEY = SchemaFilename(databaseName,databaseAddress,databasePort,databaseUser);
+  var CACHE_KEY = SchemaFilename(databaseName,databaseAddress,databasePort,databaseUser,databaseProtocol);
   this.abstractTableDB = DB;
   this.databaseName = databaseName;
   this.databaseAddress = databaseAddress;
   this.databasePassword  = databasePassword;
   this.databasePort = databasePort;
   this.databaseUser = databaseUser;
-  if(  typeof dbConnection !== 'object' ) {
-    var err = new Error("Abstract Table client property in constructor not an object")
+  if(  typeof Client !== 'object' ) {
+    var err = new Error("Abstract Table client property in constructor not an object -> "+Client+"")
     throw err;
   }
-  dbConnection.setConnectionParams(databaseName,databaseAddress,databasePassword,databasePort,databaseUser)
-  this.Client = dbConnection
-  createVirtualSchema(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,this.Client);
+  Client.setConnectionParams(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol)
+  this.Client = Client
+  setSqlSchemaCache(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,this.Client,databaseProtocol);
   // console.log("process[CACHE_KEY]",process[CACHE_KEY])
   this.abstractTableTableSchema = [];
   try {
-    this.abstractTableTableSchema = (process[CACHE_KEY][tablename]) || [];
+    this.abstractTableTableSchema = process[CACHE_KEY][tablename] || [];
   } catch(e){
+    console.error(CACHE_KEY,e.stack)
+  }
+  if( this.abstractTableTableSchema.length === 0 ){
+    console.error("this.abstractTableTableSchema was empty",this.abstractTableTableSchema)
   }
   this.abstractTableTableName = tablename || undefined;
   this.abstractTablePrimaryKey = (_(this.abstractTableTableSchema).chain().filter(function(s){ return s.is_primary_key }).compact().head().value() || {}).column_name || null
   this.initializeTable.bind(this)();
-  this.exceptions = EXCEPTIONS[this.sqlProtocol]
+  this.exceptions = EXCEPTIONS[this.databaseProtocol]
   createDynamicSearchByPrimaryKeyOrForeignKeyIdPrototypes(this.abstractTableTableSchema);
 };
 
-AbstractTable.prototype.setConnectionParams = function(databaseName,databaseAddress,databasePassword,databasePort,databaseUser){
-  this.Client.setConnectionParams(databaseName,databaseAddress,databasePassword,databasePort,databaseUser)
+AbstractTable.prototype.setConnectionParams = function(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol){
+  this.Client.setConnectionParams(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol)
 }
 
 function createDynamicSearchByPrimaryKeyOrForeignKeyIdPrototypes(schema){
+
   var idColumns = _.compact(_.map(schema,function(obj){
     var endsIn_id =  obj.column_name.lastIndexOf('_id') === (obj.column_name.length-3) ;
     if( endsIn_id  )
@@ -492,7 +345,7 @@ AbstractTable.prototype.values = function(params){
           }
           break;
       }
-      //abstractDBLog("INSERT VALUES => type="+ofTypeColumn+" , value="+value+", column_name="+key);
+      //debugLog("INSERT VALUES => type="+ofTypeColumn+" , value="+value+", column_name="+key);
       switch(ofTypeColumn){
         case 'date':
           columnNames.push(key);
@@ -860,7 +713,7 @@ AbstractTable.prototype.optimizeQuery = function(){
 
 AbstractTable.prototype.dbQuery = function(query,callback){
   var self = this;
-  self.setConnectionParams.bind(self)(self.databaseName,self.databaseAddress,self.databasePassword,self.databasePort,self.databaseUser)
+  self.setConnectionParams.bind(self)(self.databaseName,self.databaseAddress,self.databasePassword,self.databasePort,self.databaseUser,self.databaseProtocol)
   self.Client.query.bind(self.Client)(query,[],function(err,results){
     if(err) return callback(err,null);
     var data = [];
@@ -876,7 +729,7 @@ AbstractTable.prototype.dbQuery = function(query,callback){
 
 AbstractTable.prototype.dbQuerySync = function(query){
   var self = this;
-  self.setConnectionParams(self.databaseName,self.databaseAddress,self.databasePassword,self.databasePort,self.databaseUser)
+  self.setConnectionParams(self.databaseName,self.databaseAddress,self.databasePassword,self.databasePort,self.databaseUser,self.databaseProtocol)
   var ret = self.Client.querySync.bind( self.Client )(query);
   ret.failed = ret.error ? true : false;
   ret.Rows = function () {  return ret.rows; };
@@ -958,7 +811,7 @@ AbstractTable.prototype.runSync = function(callback){
 AbstractTable.prototype.finalizeQuery = function(){
 
 
-  if( this.sqlProtocol != 'postgresql' ) return this;
+  if( this.databaseProtocol != 'postgresql' ) return this;
 
   var querySet = this.abstractTableQuery;
   var querySetTrimmed = querySet.trim();
@@ -988,7 +841,7 @@ AbstractTable.prototype.printQuery = function(ovrLog){
   var QueryToPrint = self.abstractTableQuery + self.returnIds;
   var queryLog = "\nquery => " + QueryToPrint + "\n";
   if( ! ovrLog ){
-    abstractDBLog(queryLog);
+    debugLog(queryLog);
     return this;
   }
   console.log(queryLog);

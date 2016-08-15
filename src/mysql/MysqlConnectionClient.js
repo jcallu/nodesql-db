@@ -10,7 +10,7 @@ var MySQL = require('mysql')
 var mysql  = MySQL.createPoolCluster();
 var mysqlSync = require('./mysqlSync.js')
 
-var mysqlConnections = {
+var connectionsMap = {
   pool: {},
   client: {}
 };
@@ -20,7 +20,7 @@ var defaults = {
   poolIdleTimeout: config.NODESQLDB_POOL_IDLE_TIMEOUT,
   poolSize: config.NODESQLDB_POOL_SIZE,
   parseInt8: parseInt,
-  DB_CONNECTION_ID: mysqlData.DB_CONNECTION_ID>=0 ? mysqlData.DB_CONNECTION_ID : 1
+  dbConnectionId: mysqlData.dbConnectionId>=0 ? mysqlData.dbConnectionId : 1
 }
 var LOG_CONNECTIONS = config.LOG_CONNECTIONS;
 var SYNC_LOGOUT_TIMEOUT = config.NODESQLDB_POOL_IDLE_TIMEOUT;
@@ -28,20 +28,28 @@ var DB_LOG_ON = config.DB_LOG_ON
 var DB_LOG_SLOW_QUERIES_ON = config.DB_LOG_SLOW_QUERIES_ON
 var IS_DEV_ENV = config.IS_DEV_ENV
 
-function DBConnection(databaseName,databaseAddress,databasePassword,databasePort,databaseUser){
-  this.setConnectionParams.bind(this)(databaseName,databaseAddress,databasePassword,databasePort,databaseUser);
-  this.mysqlClientDefaults = _.cloneDeep(defaults);
-  // console.log("this.mysqlClientDefaults",this.mysqlClientDefaults)
-  this.mysqlClientIntervalTimer = 0;
-  this.clientConnectionID = ( parseInt(mysqlData.DB_CONNECTION_ID) >= 1 ? parseInt(mysqlData.DB_CONNECTION_ID) : 1 );
+function DBConnection(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol){
+  this.setConnectionParams.bind(this)(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol);
+  this.clientDefaults = _.cloneDeep(defaults);
+  this.clientEndIntervalTimer = 0;
+  this.clientConnectionID = ( parseInt(mysqlData.dbConnectionId) >= 1 ? parseInt(mysqlData.dbConnectionId) : 1 );
 }
 
-DBConnection.prototype.setConnectionParams = function(databaseName,databaseAddress,databasePassword,databasePort,databaseUser){
-  this.setDatabaseName(databaseName);
-  this.setDatabaseAddress(databaseAddress);
-  this.setDatabasePort(databasePort);
-  this.setDatabaseUser(databaseUser);
-  this.setDatabasePassword(databasePassword);
+DBConnection.prototype.setConnectionParams = function(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,databaseProtocol){
+  this.setDatabaseName.bind(this)(databaseName);
+  this.setDatabaseAddress.bind(this)(databaseAddress);
+  this.setDatabasePort.bind(this)(databasePort);
+  this.setDatabaseUser.bind(this)(databaseUser);
+  this.setDatabasePassword.bind(this)(databasePassword);
+  this.setDatabaseProtocol.bind(this)(databaseProtocol);
+}
+
+DBConnection.prototype.setDatabaseProtocol = function(databaseProtocol){
+  if( typeof databaseProtocol == 'undefined' ) {
+    var e = new Error("unrecognized protocol -> "+databaseProtocol)
+    throw e
+  }
+  this.databaseProtocol = databaseProtocol || dbAdapterName;
 }
 
 DBConnection.prototype.setDatabaseName = function(dbName){
@@ -71,6 +79,7 @@ DBConnection.prototype.getConnectionString = function(){
   var port = this.databasePort;
   var name = this.databaseName;
   var connectionString = "mysql://" + user + ":" + password + "@" + address + ":" + port + "/" + name ;
+  // console.log("connectionString",connectionString)
   return connectionString;
 };
 
@@ -93,21 +102,21 @@ DBConnection.prototype.poolConnectionFailure = function(err,done,callback){
 DBConnection.prototype.logQuery = logQuery
 
 
-function isMYSQLPoolDisconnected(conStr){
+function isClientPoolDisconnected(conStr){
   // console.log("?",mysql._nodes instanceof Object,mysql)
-  return typeof mysqlConnections.pool['"'+conStr+'"'] == 'undefined' && ( !( mysql instanceof Object ) || !( mysql._nodes instanceof Object ) || mysql._closed || mysql._nodes[conStr] == 'undefined' )
+  return typeof connectionsMap.pool['"'+conStr+'"'] == 'undefined' && ( !( mysql instanceof Object ) || !( mysql._nodes instanceof Object ) || mysql._closed || mysql._nodes[conStr] == 'undefined' )
 }
 
 /** Setup a new Asynchronous MYSQL Client **/
-DBConnection.prototype.MYSQLNewPool = function(){
+DBConnection.prototype.ClientNewPool = function(){
   if( !this.databaseName ){    console.error( new Error( "DBConnection.databaseName not assigned -> " + this.databaseName + ", typeof -> " + (typeof this.databaseName) ) ); }
   if( !this.databaseAddress ){ console.error( new Error( "DBConnection.databaseAddress not assigned -> " + this.databaseAddress + ", typeof -> " + (typeof this.databaseAddress) ) ); }
   var dbConnectionString = this.getConnectionString.bind(this)();
-  if( isMYSQLPoolDisconnected(dbConnectionString) ){
-    mysqlConnections.pool['"'+dbConnectionString+'"'] = true;
+  if( isClientPoolDisconnected(dbConnectionString) ){
+    connectionsMap.pool['"'+dbConnectionString+'"'] = true;
     var poolConfig = {
-      connectTimeout  : this.mysqlClientDefaults.poolIdleTimeout,
-      connectionLimit : this.mysqlClientDefaults.poolSize,
+      connectTimeout  : this.clientDefaults.poolIdleTimeout,
+      connectionLimit : this.clientDefaults.poolSize,
       host            : this.databaseAddress,
       user            : this.databaseUser,
       password        : this.databasePassword,
@@ -116,7 +125,7 @@ DBConnection.prototype.MYSQLNewPool = function(){
     }
     mysql.add(dbConnectionString,poolConfig);
   }
-  if(  LOG_CONNECTIONS != false ) console.log(this.databaseName,"MYSQL Client Async Size = " + this.mysqlClientDefaults.poolSize + " :  DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
+  if(  LOG_CONNECTIONS != false ) console.log(this.databaseProtocol,this.databaseName,"Pool Size = " + this.clientDefaults.poolSize + " - DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
 }
 
 
@@ -128,8 +137,8 @@ DBConnection.prototype.query = function(query, params, callback){
   var startTime = process.hrtime();
   var dbConnectionString = self.getConnectionString.bind(self)();
 
-  if( isMYSQLPoolDisconnected(dbConnectionString) ) { /* If MYSQL Async Client is disconnected, connect that awesome, piece of awesomeness!!! */
-    self.MYSQLNewPool.bind(self)();
+  if( isClientPoolDisconnected(dbConnectionString) ) { /* If MYSQL Async Client is disconnected, connect that awesome, piece of awesomeness!!! */
+    self.ClientNewPool.bind(self)();
 
   }
 
@@ -166,41 +175,41 @@ DBConnection.prototype.query = function(query, params, callback){
   })
 };
 
-DBConnection.prototype.MYSQLPoolEnd = function(){
+DBConnection.prototype.ClientPoolEnd = function(){
   try {
     mysql.end();
   } catch(e){} // Force log out of async MYSQL clients
   try {
     var conString = this.getConnectionString.bind(this)();
-    delete mysqlConnections.pool["'"+conString+"'"];
+    delete connectionsMap.pool["'"+conString+"'"];
   } catch(e){}
 }
 
 /** Wrapper to end database connection **/
 DBConnection.prototype.end = function(){
   var self = this;
-  self.MYSQLPoolEnd.bind(self)()
-  self.MYSQLClientEnd.bind(self)()
+  self.ClientPoolEnd.bind(self)()
+  self.ClientEnd.bind(self)()
 }
 
 
-function isMYSQLClientDisconnected(conString){
-  return typeof mysqlConnections.client['"'+conString+'"'] === 'undefined' ||  typeof mysqlSync == 'undefined' || !( mysqlSync.mq instanceof Object) || ( !mysqlSync.mq.connected  )
+function isClientDisconnected(conString){
+  return typeof connectionsMap.client['"'+conString+'"'] === 'undefined' ||  typeof mysqlSync == 'undefined' || !( mysqlSync.mq instanceof Object) || ( !mysqlSync.mq.connected  )
 }
 
 /** Setup a new Synchronous MYSQL Client **/
-DBConnection.prototype.MYSQLNewClient = function(dbConnectionString){
+DBConnection.prototype.NewClient = function(dbConnectionString){
   if( !this.databaseName ){    console.error( new Error( "DBConnection.databaseName not assigned -> " + this.databaseName + ", typeof -> " + (typeof this.databaseName) ) ); }
   if( !this.databaseAddress ){ console.error( new Error( "DBConnection.databaseAddress not assigned -> " + this.databaseAddress + ", typeof -> " + (typeof this.databaseAddress) ) ); }
-  if( isMYSQLClientDisconnected(dbConnectionString) ){
+  if( isClientDisconnected(dbConnectionString) ){
     try {
       mysqlSync.connectSync( dbConnectionString )
-      mysqlConnections.client['"'+dbConnectionString+'"'] = true
+      connectionsMap.client['"'+dbConnectionString+'"'] = true
     } catch(e){
     }
-    this.MYSQLClientReaper.bind(this)()
+    this.ClientReaper.bind(this)()
   }
-  if( LOG_CONNECTIONS != false )   console.log(this.databaseName,"MYSQL Client Sync Size = "+1+" :  DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
+  if( LOG_CONNECTIONS != false )   console.log(this.databaseProtocol,this.databaseName,"Client Size = 1 - DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
 }
 
 /** Query using the Synchronous MYSQL Client **
@@ -209,10 +218,10 @@ DBConnection.prototype.MYSQLNewClient = function(dbConnectionString){
  */
 DBConnection.prototype.querySync = function(query,params,callback){
   var startTime = process.hrtime();
-  clearInterval( this.mysqlClientIntervalTimer );   /* Prevent logout if it has not happened yet. */
+  clearInterval( this.clientEndIntervalTimer );   /* Prevent logout if it has not happened yet. */
   var dbConnectionString = this.getConnectionString.bind(this)()
-  if( isMYSQLClientDisconnected(dbConnectionString) ){
-    this.MYSQLNewClient.bind(this)(dbConnectionString);
+  if( isClientDisconnected(dbConnectionString) ){
+    this.NewClient.bind(this)(dbConnectionString);
   }
   if ( typeof params == 'function' ){  callback = params; params = null; }
   callback = typeof callback === 'function' ? callback : function(){};
@@ -229,7 +238,7 @@ DBConnection.prototype.querySync = function(query,params,callback){
     ret.error = err;
     ret.rows = []
   } // run blocking/synchronous query to db, careful because it throws errors so we try/catched dem' bugs
-  this.MYSQLClientReaper.bind(this)();
+  this.ClientReaper.bind(this)();
   this.logQuery.bind(this)(startTime, query_, params);
   callback(ret.error, ret.rows);
   return ret;
@@ -238,20 +247,20 @@ DBConnection.prototype.querySync = function(query,params,callback){
 
 
 /** Force Sync Clients to die after certain time **/
-DBConnection.prototype.MYSQLClientReaper = function(){
-  clearInterval( this.mysqlClientIntervalTimer ); // Just killed MYSQL Sync Client.
-  this.mysqlClientIntervalTimer = setInterval( this.MYSQLClientEnd.bind(this) , SYNC_LOGOUT_TIMEOUT);
-  this.mysqlClientIntervalTimer.unref.bind(this)()
+DBConnection.prototype.ClientReaper = function(){
+  clearInterval( this.clientEndIntervalTimer ); // Just killed MYSQL Sync Client.
+  this.clientEndIntervalTimer = setInterval( this.ClientEnd.bind(this) , SYNC_LOGOUT_TIMEOUT);
+  this.clientEndIntervalTimer.unref.bind(this)()
 }
 
 /** Force Sync Client to die **/
-DBConnection.prototype.MYSQLClientEnd = function(){
+DBConnection.prototype.ClientEnd = function(){
   var conString = this.getConnectionString.bind(this)();
   try {
-    clearInterval( this.mysqlClientIntervalTimer );
+    clearInterval( this.clientEndIntervalTimer );
     mysqlSync.end();
   } catch(e){ /*console.error(e.stack);*/ } // Force log out of  sync MYSQL clients
-  delete mysqlConnections.client["'"+conString+"'"];
+  delete connectionsMap.client["'"+conString+"'"];
 }
 
 
