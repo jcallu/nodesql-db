@@ -7,14 +7,9 @@ app.js ->
 
      var db = require('nodesql-db')
 
-Pass env variables:  
-
-    # using env variables
-
-
 use a connection string:
 
-    # using hardcoded connection string
+    # using coded connection string
     $  node app.js
 app.js ->
 
