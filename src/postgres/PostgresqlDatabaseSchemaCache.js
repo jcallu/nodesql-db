@@ -1,4 +1,6 @@
 var NODESQLDB_HOME = __dirname+'/../'
+var config = require('../config.js')
+var NODE_ENV = config.NODE_ENV
 var fs = require('fs');
 var _ = require('lodash');
 var SchemaFilename = require('../SchemaFilename.js')
