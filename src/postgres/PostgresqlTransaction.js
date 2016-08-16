@@ -24,7 +24,7 @@ function Transaction (databaseName,databaseAddress,databasePassword,databasePort
   var TransactionClient = new PGClient.Client( dbConnectionString );
   var Client = new PostgresqlTransactionConnectionClient(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,TransactionClient,databaseProtocol)
 
-  // console.log("Client",Client)
+  // Client.end();
 
   this.RolledBack = false;
   this.Closed = false;

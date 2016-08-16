@@ -4,12 +4,16 @@ var LexerTokenize = require('sql-parser').lexer.tokenize
 var _ = require('lodash')
 var fs = require('fs')
 var syncOutputDataFile = __dirname+"/output/sync.log"
+var outputFD = null
 
 var mysqlSync = {
   connectionString: '',
   connectSync: function(connectionString){
     this.connectionString = connectionString;
-    this.mq.connected = true;
+    if( !outputFD ){
+      this.mq.connected = true;
+      outputFD = outputFD || fs.openSync(syncOutputDataFile, 'w+');
+    }
   },
   getSyncQuery: function(query,params){
     params = params instanceof Array ? params : []
@@ -61,8 +65,8 @@ var mysqlSync = {
     var ret = {};
     try {
       fs.writeFileSync(syncOutputDataFile,'')
-      var output = fs.openSync(syncOutputDataFile, 'w+');
-      ret = spawnSync("node",[__dirname+"/mysqlCliClient.js",this.connectionString,query],{ env: process.env, maxBuffer: 1e9, stdio: [0,output,'pipe'] })
+      ret = spawnSync("node",[__dirname+"/mysqlCliClient.js",this.connectionString,query],{ env: process.env, maxBuffer: 1e9, stdio: [0,outputFD,'pipe'] })
+
     } catch(e){
       ret = {error: e}
     }
@@ -99,6 +103,13 @@ var mysqlSync = {
     return results.rows;
   },
   end: function(){
+    // console.log("end#outputFD",outputFD)
+    try {
+      fs.closeSync(outputFD);
+    } catch(e){
+
+    }
+    outputFD = null;
     this.mq.connected = undefined;
   },
   defaults: {},

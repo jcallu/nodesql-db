@@ -5,6 +5,7 @@ var moment = require('moment-timezone')
 var config = require('../config.js')
 var logQuery = require('../logQuery.js')
 var PG = require('pg').native
+var async = require('async')
 var PGNative = require('pg-native');
 var pg = PG;
 var pgSync = {};
@@ -83,9 +84,9 @@ DBConnection.prototype.getConnectionString = function(){
 DBConnection.prototype.poolConnectionFailure = function(err,done,callback){
   done = typeof done === 'function' ? done : function(){}; // make sure client can be killed without any syntax errors.
   callback = typeof callback == 'function' ? callback : function(){};
-  err = err ? ( err instanceof Error ? err : new Error(err) ) : new Error(); // make sure error is an Error instance.
+  err = err ? ( err instanceof Error ? err : new Error(err) ) : new Error('PG Pool Died'); // make sure error is an Error instance.
   if(err) {
-    try { self.ClientPoolEnd.bind(self)(); } catch(e){ /* console.error(e.stack) */ };
+    try { this.ClientPoolEnd.bind(this)(); } catch(e){ /* console.error(e.stack) */ };
   } // kill the async client and reload the connection
   try { done(); } catch(e){ /* console.error(e.stack) */ }
   callback(err);
@@ -110,6 +111,7 @@ function newClientPool(){
 newClientPool();
 
 function isClientPoolDisconnected(conString){
+
   return !( pg.pools instanceof Object ) || !( pg.pools.all instanceof Object ) || typeof pg.pools.all['"'+conString+'"'] === 'undefined'
 }
 /** Setup a new Asynchronous  Client **/
@@ -129,32 +131,41 @@ DBConnection.prototype.ClientNewPool = function(){
 
 /** Query using the Asynchronous  Client **/
 DBConnection.prototype.query = function(query, params, callback){
+  var self = this;
   var startTime = process.hrtime();
-  var dbConnectionString = this.getConnectionString();
+  var dbConnectionString = self.getConnectionString.bind(self)();
   if( isClientPoolDisconnected(dbConnectionString) ) { /* If  Async Client is disconnected, connect that awesome, piece of awesomeness!!! */
-    this.ClientNewPool.bind(this)();
+    self.ClientNewPool.bind(self)();
   }
   if ( typeof params == 'function' ){  callback = params; params = null; }
   callback = typeof callback === 'function' ? callback : function(){};
-  var self = this;
-  pg.connect( dbConnectionString , function(err, client, done) {
-    var isConnected = !err  && client instanceof Object  && typeof client.query === 'function' && typeof done === 'function'
-    if ( isConnected ) { /*  Check if client connected then run the query */
-      return client.query.bind(client)(query, params, function(err, result) {
-        try{ done(); } catch(e){ err = err ? err : e }
-        self.logQuery.bind(self)(startTime, query, params)
-        if(err){  err.message = err.message + "\r" + query + (params ? (", "+JSON.stringify(params)) : '');  }
-        callback(err, result);
+
+
+
+  async.waterfall([
+    function runQuery(wcb){
+      pg.connect( dbConnectionString , function(err, client, done) {
+        var isConnected = !err  && client instanceof Object  && typeof client.query === 'function' && typeof done === 'function'
+        if ( isConnected ) { /*  Check if client connected then run the query */
+          return client.query.bind(client)(query, params, function(err, result) {
+            try{ done(); } catch(e){ err = err ? err : e }
+            self.logQuery.bind(self)(startTime, query, params)
+            if(err){  err.message = err.message + "\r" + query + (params ? (", "+JSON.stringify(params)) : '');  }
+            wcb(err, result);
+          });
+        }
+        self.poolConnectionFailure.bind(self)(err, done, wcb); /*  The Client died, didn't connect, or errored out; so make sure it gets buried properly, and resurrected immediately for further querying. */
       });
     }
-    self.poolConnectionFailure.bind(self)(err, done, callback); /*  The Client died, didn't connect, or errored out; so make sure it gets buried properly, and resurrected immediately for further querying. */
-  });
-
+  ],function(err,data){
+    if(err) return callback(err);
+    callback(null,data)
+  })
 };
 DBConnection.prototype.ClientPoolEnd = function(){
   var conString = this.getConnectionString.bind(this)();
   try { pg.end(); } catch(e){ /*console.error(e.stack);*/ } // Force log out of async  clients
-  delete connectionsMap.pool["'"+conString+"'"];
+  delete connectionsMap.pool['"'+conString+'"'];
 }
 
 /** Wrapper to end database connection **/
@@ -219,7 +230,7 @@ DBConnection.prototype.querySync = function(query,params,callback){
 DBConnection.prototype.ClientReaper = function(){
   clearInterval( this.clientEndIntervalTimer ); // Just killed PG Sync Client.
   this.clientEndIntervalTimer = setInterval( this.ClientEnd.bind(this) , SYNC_LOGOUT_TIMEOUT);
-  this.clientEndIntervalTimer.unref.bind(this)()
+  this.clientEndIntervalTimer.unref()
 }
 
 /** Force Sync Client to die **/

@@ -46,11 +46,11 @@ module.exports = function(connStrOrObj){
       for( var tablename in schema ){
         this[tablename] = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache);
       }
-      function TransactionBoundary(){
-        return PostgresqlTransaction.call(null,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache,AbstractTable);
+      function Transaction(){
+        return PostgresqlTransaction.call(this,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache,AbstractTable);
       }
-      util.inherits(TransactionBoundary,PostgresqlTransaction);
-      this.Transaction = function Transaction(){ return new TransactionBoundary() }
+      util.inherits(Transaction,PostgresqlTransaction);
+      this.Transaction = Transaction
       this.Promise = Promise
       this.Client = Client
       break;
