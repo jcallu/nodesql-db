@@ -78,7 +78,7 @@ module.exports = function MysqlDatabaseSchemaCache(dbName,dbAddr,dbPasswd,dbPort
     console.error(e.stack);
   }
 
-  var pathToFileCache = NODESQLDB_HOME + '/schemas/'+CACHE_KEY+'.json';
+  var pathToFileCache = NODESQLDB_HOME + 'schemas/'+CACHE_KEY+'.json';
   if( schemaTmp.error || !( schemaTmp instanceof Object ) || ! ( schemaTmp.rows instanceof Array ) || schemaTmp.rows.length === 0  ){
     var schemaFromFile;
     try {
