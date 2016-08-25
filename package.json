@@ -1,6 +1,6 @@
 {
   "name": "nodesql-db",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "description": "Node.js for Postgres, Mysql, Memsql",
   "engines": {
     "node": "4.5.0"
