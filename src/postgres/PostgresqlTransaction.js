@@ -18,23 +18,21 @@ function Transaction (databaseName,databaseAddress,databasePassword,databasePort
   this.databasePassword = databasePassword
   this.databasePort = databasePort;
   this.databaseUser = databaseUser;
-
-  var dbConnectionString = dbConnection.getConnectionString.bind(dbConnection)()
-
-  var TransactionClient = new PGClient.Client( dbConnectionString );
+  this.dbConnectionString = dbConnection.getConnectionString.bind(dbConnection)()
+  var TransactionClient = new PGClient.Client( this.dbConnectionString );
   var Client = new PostgresqlTransactionConnectionClient(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,TransactionClient,databaseProtocol)
-
-  // Client.end();
-
-  this.RolledBack = false;
-  this.Closed = false;
-  this.Begun = false
+  this.Setup.bind(this)();
   this.Client = Client;
   this.Promise = function dbPromise(){ return Q.fcall(function(){ return; }); };
-
   for( var tablename in schema ){
     this[tablename] = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache);
   }
+  return this;
+}
+Transaction.prototype.Setup = function(){
+  this.RolledBack = false;
+  this.Closed = false;
+  this.Begun = false;
   return this;
 }
 
@@ -48,19 +46,16 @@ Transaction.prototype.GetDB = function(){
 
 
 Transaction.prototype.Begin = function(){
-
-  // var s = process.hrtime();
   var q = Q.defer();
   var self = this;
-
-  var beginQuery = "BEGIN;";
+  self.Setup.bind(self)();
+  var beginQuery = "BEGIN";
   self.Client.query.bind(self.Client)(beginQuery,function(err,ret){
-    if(err) {
-      self.Rollback.bind(self)();
-    } else {
-      self.Begun = true;
-      q.resolve(ret);
+    if( err ) {
+      return self.Rollback.bind(self)();
     }
+    self.Begun = true;
+    q.resolve(ret);
   });
   return q.promise;
 };
@@ -81,7 +76,8 @@ Transaction.prototype.Boundary = function(promisedStep){
       self.Rollback.bind(self)(err).fail(function(err){
         q.reject(err);
       });
-    }).done();
+    })
+    .done();
   }
 
   return q.promise;
@@ -90,16 +86,22 @@ Transaction.prototype.Boundary = function(promisedStep){
 Transaction.prototype.Commit = function(){
   var self = this;
   var q = Q.defer();
-  var commitQuery = "COMMIT;";
-  self.Client.query.bind(self.Client)(commitQuery,function(err,ret){
-    if(err){
-      self.Rollback(err);
-    } else {
-      self.Client.end.bind(self.Client)();
-      self.Closed = true;
-      q.resolve(ret);
-    }
-  });
+  if( !self.Begun || self.Closed || self.RolledBack ){
+    q.resolve()
+  }
+  else {
+    var commitQuery = "COMMIT";
+    self.Client.query.bind(self.Client)(commitQuery,function(err,ret){
+      if(err){
+        self.Rollback(err);
+      } else {
+        self.Client.end.bind(self.Client)();
+        self.Closed = true;
+        q.resolve(ret);
+      }
+    });
+  }
+
   return q.promise;
 };
 

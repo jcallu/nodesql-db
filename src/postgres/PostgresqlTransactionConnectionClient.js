@@ -33,6 +33,7 @@ function DBConnection(databaseName,databaseAddress,databasePassword,databasePort
   this.clientDefaults = _.cloneDeep(defaults);
   this.clientEndIntervalTimer = 0;
   this.Client = Client;
+  this.ClientReaper.bind(this)();
   this.Client.defaults = this.clientDefaults;
   this.clientConnectionID = 1
 }
@@ -91,11 +92,16 @@ DBConnection.prototype.getConnectionString = function(){
   var connectionString = "postgresql://" + user + ":" + password + "@" + address + ":" + port + "/" + name ; /* Create a TCP postgresql Call string using a database, password, port, and address; password and port are defaulted currently to config's */
   return connectionString;
 };
+DBConnection.prototype.isConnected = function isConnected(){
+  var self = this;
+  var isConnected = false
+  try { isConnected = self.Client.native.pq.connected == true } catch(e){}
+  return isConnected;
+}
 
 /** Query using the Asynchronous PG Client **/
 DBConnection.prototype.query = function(queryIn, paramsIn, callback){
   var self = this;
-  self.ClientReaper.bind(self)();
   var query = _.cloneDeep(queryIn);
   var params = paramsIn instanceof Array ? _.cloneDeep(paramsIn) : paramsIn;
   var startTime = process.hrtime();
@@ -105,24 +111,28 @@ DBConnection.prototype.query = function(queryIn, paramsIn, callback){
   }
   callback = typeof callback === 'function' ? callback : function(){};
   async.waterfall([
-      function ifNotConnectedConnect(wcb){
-        var isConnected = false
-        try { isConnected = self.Client.native.pq.connected == true } catch(e){}
-        if( isConnected ) return wcb();
-        self.Client.connect.bind(self.Client)(wcb)
-      },
-      function queryCall(wcb){
-        self.Client.query.bind(self.Client)(query, params, function(err, result) {
-          if(err){ try{  err.message = err.message + "\r" + query;  } catch(e){ console.error(e.stack) } }
-          self.logQuery.bind(self)(startTime, query, params)
-          setImmediate(function(){ callback(err, result); });
-        });
-      }
-  ],callback)
+    function ifNotConnectedConnect(wcb){
+      if( self.isConnected.bind(self)() ) return wcb();
+      self.Client.connect.bind(self.Client)(function(err){
+        wcb(err);
+      })
+    },
+    function queryCall(wcb){
+      self.Client.query.bind(self.Client)(query, params, function(err, result, done) {
+        if(err){ try{  err.message = err.message + "\r" + query;  } catch(e){ console.error(e.stack) } }
+        self.logQuery.bind(self)(startTime, query, params)
+        setImmediate(function(){ callback(err, result); });
+      });
+    }
+  ],function(err,ret){
+    self.ClientReaper.bind(self)();
+    callback(err,ret);
+  })
 };
 
 DBConnection.prototype.querySync = function(queryIn, paramsIn, callback){
   var err = new Error("transaction querySync not supported")
+  console.error(err.stack);
   callback(err)
 }
 
