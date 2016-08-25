@@ -9,8 +9,8 @@ function Transaction (databaseName,databaseAddress,databasePassword,databasePort
   var fsSchemaCacheKey = SchemaFilename(databaseName,databaseAddress,databasePort,databaseUser,databaseProtocol)
   var schemaSet = PostgresqlDatabaseSchemaCache(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,dbConnection,databaseProtocol);
   // console.log("schemaSet",Object.keys(schemaSet).length,fsSchemaCacheKey)
-  var tableSchema =  schemaSet || process[fsSchemaCacheKey] || {};
-  if( Object.keys(tableSchema).length == 0 ){
+  var schema =  schemaSet || process[fsSchemaCacheKey] || {};
+  if( Object.keys(schema).length == 0 ){
     throw Error("Schema "+databaseName+" not initialized");
   }
   this.databaseName = databaseName;
@@ -32,10 +32,9 @@ function Transaction (databaseName,databaseAddress,databasePassword,databasePort
   this.Client = Client;
   this.Promise = function dbPromise(){ return Q.fcall(function(){ return; }); };
 
-  _.forEach(tableSchema,function(value,tablename){
-    var table = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache);
-    this[tablename] = table;
-  });
+  for( var tablename in schema ){
+    this[tablename] = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache);
+  }
   return this;
 }
 
@@ -67,7 +66,7 @@ Transaction.prototype.Begin = function(){
   return q.promise;
 };
 
-Transaction.prototype.boundary = function(promisedStep){
+Transaction.prototype.Boundary = function(promisedStep){
   var self = this;
   var q = Q.defer();
   if( !( promisedStep instanceof Object ) && promisedStep.state !== 'pending' ) {
