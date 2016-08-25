@@ -55,12 +55,11 @@ Transaction.prototype.Begin = function(){
 
   var beginQuery = "BEGIN;";
   self.Client.query.bind(self.Client)(beginQuery,function(err,ret){
-    // console.log("BEGIN",err,ret)
     if(err) {
       self.Rollback.bind(self)();
     } else {
       self.Begun = true;
-      q.resolve();
+      q.resolve(ret);
     }
   });
   return q.promise;
@@ -69,11 +68,12 @@ Transaction.prototype.Begin = function(){
 Transaction.prototype.Boundary = function(promisedStep){
   var self = this;
   var q = Q.defer();
-  if( !( promisedStep instanceof Object ) && promisedStep.state !== 'pending' ) {
+  if( !( promisedStep instanceof Object && typeof promisedStep.then === 'function' && typeof promisedStep.fail == 'function' ) ) {
     self.Rollback.bind(self)().fail(function(err){
       q.reject(new Error("Boundary function was not a promise"));
     });
-  } else {
+  }
+  else {
     promisedStep.then(function(ret){
       q.resolve(ret);
     })
@@ -88,20 +88,17 @@ Transaction.prototype.Boundary = function(promisedStep){
 };
 
 Transaction.prototype.Commit = function(){
-  // var s = process.hrtime();
   var self = this;
   var q = Q.defer();
   var commitQuery = "COMMIT;";
-  self.Client.query(commitQuery,function(err,ret){
-    self.Client.logQuery(s,commitQuery);
+  self.Client.query.bind(self.Client)(commitQuery,function(err,ret){
     if(err){
       self.Rollback(err);
     } else {
-      self.Client.end();
+      self.Client.end.bind(self.Client)();
       self.Closed = true;
       q.resolve(ret);
     }
-
   });
   return q.promise;
 };
@@ -119,9 +116,8 @@ Transaction.prototype.Rollback = function(err){
 
   if( self.RolledBack == false ) {
     self.Client.query.bind(self.Client)(rollbackQuery,function(err2,ret){
-
       try {
-        self.Client.end();
+        self.Client.end.bind(self.Client)();
       } catch(e){
       }
       self.RolledBack = true;
@@ -141,11 +137,11 @@ Transaction.prototype.Rollback = function(err){
     });
   } else {
     try {
-      self.Client.end();
+      self.Client.end.bind(self.Client)();
     } catch(e){
     }
     self.Closed = true;
-    q.reject(null);
+    q.reject(new Error("Transaction RolledBack -> "+self.RolledBack+", Transaction Closed -> "+self.Closed));
   }
   return q.promise;
 };
