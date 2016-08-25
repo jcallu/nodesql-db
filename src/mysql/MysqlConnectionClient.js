@@ -141,6 +141,7 @@ DBConnection.prototype.query = function(query, params, callback){
   var startTime = process.hrtime();
   if ( typeof params == 'function' ){  callback = params; params = null; }
   callback = typeof callback === 'function' ? callback : function(){};
+  clearInterval( self.clientPoolEndIntervalTimer );
   async.waterfall([
     function runQuery(wcb){
       var dbConnectionString = self.getConnectionString.bind(self)();
@@ -180,8 +181,7 @@ DBConnection.prototype.query = function(query, params, callback){
     }
   ],function(err,data){
     self.ClientPoolReaper.bind(self)();
-    if(err) return callback(err);
-    callback(null,data)
+    callback(err,data);
   })
 };
 

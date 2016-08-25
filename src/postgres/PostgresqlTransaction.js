@@ -23,6 +23,7 @@ function Transaction (databaseName,databaseAddress,databasePassword,databasePort
   var Client = new PostgresqlTransactionConnectionClient(databaseName,databaseAddress,databasePassword,databasePort,databaseUser,TransactionClient,databaseProtocol)
   this.Setup.bind(this)();
   this.Client = Client;
+  this.keepAliveInterval = {};
   this.Promise = function dbPromise(){ return Q.fcall(function(){ return; }); };
   for( var tablename in schema ){
     this[tablename] = new AbstractTable(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,PostgresqlDatabaseSchemaCache);
@@ -44,16 +45,39 @@ Transaction.prototype.GetDB = function(){
   return this.databaseName;
 };
 
+Transaction.prototype.KeepAlive = function(){
+  var intervalReady = true;
+  var intervalTime = 5e3;
+  var self = this;
+  try {
+    intervalTime = self.Client.Client.defaults.reapIntervalMillis
+    intervalTime = !isNaN(parseInt(intervalTime)) ? parseInt(intervalTime) : 5e3;
+  } catch(e){}
+  clearInterval(self.keepAliveInterval);
+  self.keepAliveInterval = setInterval(function(){
+    if( ! intervalReady ) return;
+    if( self.keepAliveInterval._idleTimeout  == -1 ) {
+      interval = false
+      return;
+    }
+    self.Client.query.bind(self.Client)("SELECT now()",function(err,ret){
+      interval = false;
+    })
+  },intervalTime);
+  self.keepAliveInterval.unref();
+}
 
 Transaction.prototype.Begin = function(){
   var q = Q.defer();
   var self = this;
+  clearInterval(self.keepAliveInterval);
   self.Setup.bind(self)();
   var beginQuery = "BEGIN";
   self.Client.query.bind(self.Client)(beginQuery,function(err,ret){
     if( err ) {
       return self.Rollback.bind(self)();
     }
+    self.KeepAlive.bind(self)();
     self.Begun = true;
     q.resolve(ret);
   });
@@ -86,6 +110,7 @@ Transaction.prototype.Boundary = function(promisedStep){
 Transaction.prototype.Commit = function(){
   var self = this;
   var q = Q.defer();
+  clearInterval(self.keepAliveInterval);
   if( !self.Begun || self.Closed || self.RolledBack ){
     q.resolve()
   }
@@ -101,7 +126,6 @@ Transaction.prototype.Commit = function(){
       }
     });
   }
-
   return q.promise;
 };
 
@@ -115,7 +139,7 @@ Transaction.prototype.Rollback = function(err){
   // var s = process.hrtime();
   var q = Q.defer();
   var rollbackQuery = "ROLLBACK;";
-
+  clearInterval(self.keepAliveInterval);
   if( self.RolledBack == false ) {
     self.Client.query.bind(self.Client)(rollbackQuery,function(err2,ret){
       try {

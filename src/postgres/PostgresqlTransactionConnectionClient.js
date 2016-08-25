@@ -17,7 +17,7 @@ var NODE_ENV = config.NODE_ENV;
 var DB_LOG_ON = config.DB_LOG;
 var DB_LOG_SLOW_QUERIES_ON = config.DB_LOG_SLOW_QUERIES_ON;
 var IS_DEV_ENV =  config.IS_DEV_ENV
-var SYNC_LOGOUT_TIMEOUT = config.NODESQLDB_POOL_IDLE_TIMEOUT;
+var SYNC_LOGOUT_TIMEOUT = config.NODESQLDB_POOL_IDLE_TIMEOUT * 2;
 
 var pgData = {}
 var defaults = {
@@ -110,6 +110,7 @@ DBConnection.prototype.query = function(queryIn, paramsIn, callback){
     params = null;
   }
   callback = typeof callback === 'function' ? callback : function(){};
+  clearInterval( self.clientEndIntervalTimer );
   async.waterfall([
     function ifNotConnectedConnect(wcb){
       if( self.isConnected.bind(self)() ) return wcb();
