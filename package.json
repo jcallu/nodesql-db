@@ -1,9 +1,9 @@
 {
   "name": "nodesql-db",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Node.js for Postgres, Mysql, Memsql",
   "engines": {
-    "node": "4.4.x"
+    "node": "4.5.0"
   },
   "scripts": {
     "test": "./test.js"
