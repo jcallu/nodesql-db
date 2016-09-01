@@ -67,6 +67,13 @@ function GenerateWhereObj(tableName,tableSchema,whereObjOrRawSQL,AND){
           case _.isNull(value) || _.isUndefined(value):
             where_CLAUSE += " AND " + key + " IS NULL ";
             break;
+          case paramData.js_type == 'boolean':
+            if( typeof value === 'boolean' ){
+              where_CLAUSE += " AND " + key + " IS " + (value === true ? "TRUE" : "FALSE");
+            } else {
+              console.error(new Error(tableName+ " "+key+ " invalid "+paramData.js_type+" "+value).stack)
+            }
+            break;
           case ( paramData.js_type == 'number' ):
             if( !isNaN( parseInt(value) ) ){
               where_CLAUSE += " AND " + key + " = "+value+" ";
