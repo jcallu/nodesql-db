@@ -145,7 +145,6 @@ DBConnection.prototype.query = function(query, params, callback){
   async.waterfall([
     function runQuery(wcb){
       var dbConnectionString = self.getConnectionString.bind(self)();
-      // console.log("isClientPoolDisconnected(dbConnectionString)",isClientPoolDisconnected(dbConnectionString))
       if( isClientPoolDisconnected(dbConnectionString) ) { /* If MYSQL Async Client is disconnected, connect that awesome, piece of awesomeness!!! */
         self.ClientNewPool.bind(self)();
       }
@@ -156,12 +155,14 @@ DBConnection.prototype.query = function(query, params, callback){
         if ( isConnected ) { /*  Check if client connected then run the query */
           return client.query.bind(client)(query, params, function(err, data) {
             try { done(); } catch(e){ err = err ? err : e }
-            // console.log("data",data)
             self.logQuery.bind(self)(startTime, query, params)
             if(err){  err.message = err.message + "\r" + query + (params ? (", "+JSON.stringify(params)) : '');  }
             var results = { rows: [] }
-            try {
-              var keys = Object.keys(data[0])
+            var keys = [];
+            if( data instanceof Array && data.length > 0 ){
+              keys = Object.keys(data[0])
+            }
+            if( keys.length > 0 ){
               results.rows = _.map(data,function(r){
                 var o = {}
                 for( var col = 0; col < keys.length; col++ ){
@@ -169,10 +170,9 @@ DBConnection.prototype.query = function(query, params, callback){
                   o[column] = r[column]
                 }
                 return o;
-              })
-            } catch(e){
-              err = err || e;
+              })  
             }
+
             wcb(err, results);
           });
         }

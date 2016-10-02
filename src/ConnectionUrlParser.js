@@ -1,8 +1,9 @@
 var url = require('url');
 
 module.exports = {
-  parse: function parse(str) {
-    if( typeof str !== 'string') return;
+  parse: function parse(str_) {
+    if( typeof str_ !== 'string') return;
+    var str = (new String(str_)).toString('utf8');
     var config;
     if(str.charAt(0) === '/') {
       config = str.split(' ');
@@ -45,7 +46,6 @@ module.exports = {
     if (ssl === 'true' || ssl === '1') {
       config.ssl = true;
     }
-
     return config;
   }
 }

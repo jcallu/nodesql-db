@@ -15,7 +15,7 @@ function schemaQuery(dbName,tableSchema){
 (select row_to_json(_) from ( select col.column_name,col.data_type, \
 case when col.data_type in ('text','varchar','character varying') then 'string' \
 when col.data_type in ('bigint','integer','numberic','real','double precision') then 'number' \
-when col.data_type in ('timestamp without time zone','timestamp with time zone') then 'time' \
+when col.data_type in ('timestamp','timestamp without time zone','timestamp with time zone') then 'time' \
 when col.data_type in ('date') then 'date' \
 when col.data_type in ('boolean') then 'boolean' \
 when col.data_type in ('json','ARRAY') then 'object' \

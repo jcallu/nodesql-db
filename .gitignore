@@ -6,4 +6,6 @@ npm-debug.log
 test
 build
 src/mysql/output/*
+src/mysql/input/*
 !src/mysql/output/.gitkeep
+!src/mysql/input/.gitkeep

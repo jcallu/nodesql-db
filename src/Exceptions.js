@@ -1,7 +1,11 @@
 module.exports = {
   postgresql: {
-    "DUPLICATE_KEY_VIOLATION": "23505"
+    "23505": "DUPLICATE_KEY_VIOLATION"
   },
-  mysql: {},
-  memsql: {}
+  mysql: {
+    "23000": "DUPLICATE_KEY_VIOLATION"
+  },
+  memsql: {
+    "23000": "DUPLICATE_KEY_VIOLATION"
+  }
 }

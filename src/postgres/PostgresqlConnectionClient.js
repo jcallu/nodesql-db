@@ -183,16 +183,16 @@ function newClient(conString){
   pgSync.defaults.poolSize = 1; //sync clients use single connection then die
   return pgSync
 }
-function isClientDisconnected(conString){
+DBConnection.prototype.isClientDisconnected = function(conString){
   return typeof connectionsMap.client['"'+conString+'"'] === 'undefined' && ( typeof pgSync == 'undefined' || !( pgSync.pq instanceof Object) || ( !pgSync.pq.connected  ) )
 }
 /** Setup a new Synchronous PG Client **/
 DBConnection.prototype.NewClient = function(dbConnectionString){
   if( !this.databaseName ){    console.error( new Error( "DBConnection.databaseName not assigned -> " + this.databaseName + ", typeof -> " + (typeof this.databaseName) ) ); }
   if( !this.databaseAddress ){ console.error( new Error( "DBConnection.databaseAddress not assigned -> " + this.databaseAddress + ", typeof -> " + (typeof this.databaseAddress) ) ); }
-  if( isClientDisconnected(dbConnectionString) ){
-    this.ClientReaper.bind(this)()
+  if( this.isClientDisconnected.bind(this)(dbConnectionString) ){
     newClient(dbConnectionString);
+    this.ClientReaper.bind(this)()
   }
   if( LOG_CONNECTIONS != false )   console.log(this.databaseProtocol,this.databaseName,"Client Size = "+pgSync.defaults.poolSize+" - DB Client " + this.clientConnectionID + "  Connected",this.databaseAddress,this.databasePort);
 }
@@ -205,7 +205,7 @@ DBConnection.prototype.querySync = function(query,params,callback){
   var startTime = process.hrtime();
   clearInterval( this.clientEndIntervalTimer );   /* Prevent logout if it has not happened yet. */
   var dbConnectionString = this.getConnectionString.bind(this)()
-  if( isClientDisconnected(dbConnectionString) ){
+  if( this.isClientDisconnected.bind(this)(dbConnectionString) ){
     this.NewClient.bind(this)(dbConnectionString);
   }
   if ( typeof params == 'function' ){  callback = params; params = null; }

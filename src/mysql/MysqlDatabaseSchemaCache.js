@@ -11,31 +11,13 @@ function isCacheNotSet(cacheKey){
 
 function schemaQuery(dbName,tableSchema){
   tableSchema = tableSchema ? tableSchema : 'def'
-//   return "select * from (select tt.table_name as tablename, array_agg( \
-// (select row_to_json(_) from ( select col.column_name,col.data_type, \
-// case when col.data_type in ('text','varchar','character varying') then 'string' \
-// when col.data_type in ('bigint','integer','numberic','real','double precision') then 'number' \
-// when col.data_type in ('timestamp without time zone','timestamp with time zone') then 'time' \
-// when col.data_type in ('date') then 'date' \
-// when col.data_type in ('boolean') then 'boolean' \
-// when col.data_type in ('json','ARRAY') then 'object' \
-// end as js_type, \
-// case when col.column_name = ccu.column_name then true else false end as is_primary_key \
-// ) as _ ) ) as tableschema \
-// from information_schema.tables tt \
-// join information_schema.columns col on col.table_name = tt.table_name \
-// left join information_schema.table_constraints tc on tc.table_name = tt.table_name and tc.constraint_type = 'PRIMARY KEY' \
-// left JOIN information_schema.constraint_column_usage AS ccu ON tc.constraint_name = ccu.constraint_name \
-// where tt.table_catalog = '"+dbName+"' \
-// and tt.table_schema = '"+tableSchema+"' \
-// group by tt.table_name \
-// ) tables \
-// order by tables.tablename;";
+
 
   var schemaQuery = "select trim(ist.table_name) as tablename, concat('[',trim(group_concat( concat('{ \"column_name\":\"', isc.column_name,'\", \"data_type\":\"', isc.data_type,'\", \"js_type\":\"', (case \
     when isc.data_type in('text','varchar','char','binary','varbinary','blob','enum','set') then 'string' \
     when isc.data_type in('integer','int','smallint','tinyint','mediumint','bigint','decimal','numeric','float','double','bit','real', 'double precision') then 'number' \
     when isc.data_type in('date') then 'date' \
+    when isc.data_type in('timestamp') then 'time' \
     when isc.data_type in('json') then 'object' end) \
     ,'\", \"is_primary_key\":\"', (case when isc.column_key = 'PRI' then true else false end),'\"}') )\
   ),']') as tableschema \
@@ -55,21 +37,25 @@ module.exports = function MysqlDatabaseSchemaCache(dbName,dbAddr,dbPasswd,dbPort
 
   process[CACHE_KEY] = process[CACHE_KEY] || {};
   var data = dbConnection.querySync("select 1 first_db_call_test, '"+dbConnection.databaseAddress+"' as db_address,'"+dbConnection.databaseName+"' as db_name")
-
   if( data.error ) {
     var e = data.error instanceof Error ? data.error : new Error(data.error)
     console.error(e.stack);
   }
   try {
     schemaTmp = dbConnection.querySync( schemaQuery(dbName) );
-    var rows = schemaTmp.rows;
-    for( var row in rows ){
-      rows[row].tableschema = JSON.parse(rows[row].tableschema)
-      for( var columnData in rows[row].tableschema ){
-        if( rows[row].tableschema[columnData].is_primary_key == '1' ){
-          rows[row].tableschema[columnData].is_primary_key = true;
+    if( schemaTmp.error ){
+      var e = schemaTmp.error instanceof Error ? schemaTmp.error : new Error(schemaTmp.error)
+      console.error(e.stack);
+    }
+
+
+    for( var row in schemaTmp.rows ){
+      schemaTmp.rows[row].tableschema = JSON.parse(schemaTmp.rows[row].tableschema)
+      for( var columnData in schemaTmp.rows[row].tableschema ){
+        if( schemaTmp.rows[row].tableschema[columnData].is_primary_key == '1' ){
+          schemaTmp.rows[row].tableschema[columnData].is_primary_key = true;
         } else {
-          rows[row].tableschema[columnData].is_primary_key = false
+          schemaTmp.rows[row].tableschema[columnData].is_primary_key = false
         }
       }
     }

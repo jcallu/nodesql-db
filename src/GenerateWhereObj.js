@@ -2,10 +2,13 @@
 var utilityFunctions = require('./utils.js')
 var _ = require('lodash')
 var getTableSchemaDataMap = require('./getTableSchemaDataMap.js')
+var getDateForZone = utilityFunctions.getDateForZone
 
-function GenerateWhereObj(tableName,tableSchema,whereObjOrRawSQL,AND){
+
+function GenerateWhereObj(tableName,tableSchema,whereObjOrRawSQL,AND,databaseProtocol){
   var isRawSQL = typeof whereObjOrRawSQL === 'string' ? true : false;
   var where_CLAUSE = '';
+  var escapeString = ( databaseProtocol === 'mysql' || databaseProtocol === 'memsql' ) ? utilityFunctions.escapeMySQLString : utilityFunctions.escapeApostrophes;
   try {
     if( isRawSQL ){
      where_CLAUSE = '';
@@ -68,7 +71,9 @@ function GenerateWhereObj(tableName,tableSchema,whereObjOrRawSQL,AND){
             where_CLAUSE += " AND " + key + " IS NULL ";
             break;
           case paramData.js_type == 'boolean':
-            if( typeof value === 'boolean' ){
+            if( typeof value === 'boolean' && (databaseProtocol === 'mysql' || databaseProtocol === 'memsql') ){
+              where_CLAUSE += " AND " + key + " = " + (value === true ? "1" : "0");
+            } else if ( typeof value === 'boolean' ) {
               where_CLAUSE += " AND " + key + " IS " + (value === true ? "TRUE" : "FALSE");
             } else {
               console.error(new Error(tableName+ " "+key+ " invalid "+paramData.js_type+" "+value).stack)
@@ -77,43 +82,59 @@ function GenerateWhereObj(tableName,tableSchema,whereObjOrRawSQL,AND){
           case ( paramData.js_type == 'number' ):
             if( !isNaN( parseInt(value) ) ){
               where_CLAUSE += " AND " + key + " = "+value+" ";
+            } else if ( typeof value === 'boolean' ){
+              where_CLAUSE += " AND " + key + " = " + (value === true ? "1" : "0");
             } else {
               console.error(new Error(tableName+ " "+key+ " invalid "+paramData.js_type+" "+value).stack)
             }
             break;
           case ( paramData.js_type == 'date'  ):
+            var cast = "::DATE";
+            if( self.databaseProtocol == 'memsql' || self.databaseProtocol == 'mysql'){
+              cast = "";
+            }
             if( (value instanceof Date) && value !== 'Invalid Date' ){
-              where_CLAUSE += " AND "+ key +" = '"+ value.toISOString()+"'::DATE ";
-            } else if ( typeof value == 'string' && new Date(value) !== 'Invalid Date' ) {
-              value = new Date(value)
-              where_CLAUSE += " AND "+ key +" = '"+ value.toISOString()+"'::DATE ";
-            } else {
+              var dateValue = getDateForZone(value)
+              where_CLAUSE += " AND "+ key +" = '"+ dateValue +"'"+cast+" ";
+            }
+            else if ( typeof value == 'string' && new Date(value) !== 'Invalid Date' ) {
+              var dateValue = getDateForZone(value)
+              where_CLAUSE += " AND "+ key +" = '"+ dateValue +"'"+cast+" ";
+            }
+            else {
               console.error(new Error(tableName+ " "+key+ " invalid "+paramData.js_type+" "+value).stack)
             }
           case ( paramData.js_type == 'time'  ):
+            var cast = "::DATE";
+            if( databaseProtocol == 'memsql' || databaseProtocol == 'mysql'){
+              cast = "";
+            }
             if( (value instanceof Date) && value !== 'Invalid Date' ){
-              where_CLAUSE += " AND "+ key +" = '"+ value.toISOString()+"'::TIMESTAMP ";
-            } else if ( typeof value == 'string' && new Date(value) !== 'Invalid Date' ) {
-              value = new Date(value)
-              where_CLAUSE += " AND "+ key +" = '"+ value.toISOString()+"'::TIMESTAMP ";
-            } else {
+              var dateValue = getDateForZone(value)
+              where_CLAUSE += " AND "+ key +" = '"+ dateValue +"'"+cast+" ";
+            }
+            else if ( typeof value == 'string' && new Date(value) !== 'Invalid Date' ) {
+              var dateValue = getDateForZone(value)
+              where_CLAUSE += " AND "+ key +" = '"+ dateValue +"'"+cast+" ";
+            }
+            else {
               console.error(new Error(tableName+ " "+key+ " invalid "+paramData.js_type+" "+value).stack)
             }
             break;
           case ( paramData.js_type == 'object'  ):
             if( (value instanceof Object || value instanceof Array) ){
               value = JSON.stringify(value)
-              where_CLAUSE += " AND " + key + " = '" + utilityFunctions.escapeApostrophes(value) + "' ";
+              where_CLAUSE += " AND " + key + " = '" + escapeString(value) + "' ";
             } else {
               console.error(new Error(tableName+ " "+key+ " not an "+paramData.js_type+" "+value).stack)
             }
             break;
           case ( paramData.js_type == 'string'  ):
             if( typeof value === 'string' ){
-              where_CLAUSE += " AND " + key + " = '" + utilityFunctions.escapeApostrophes(value) + "' ";
+              where_CLAUSE += " AND " + key + " = '" + escapeString(value) + "' ";
             }
             else if ( value != null && typeof value !== 'undefined' && typeof value.toString === 'function' && value.toString() ){
-              where_CLAUSE += " AND " + key + " = '" + utilityFunctions.escapeApostrophes(value.toString()) + "' ";
+              where_CLAUSE += " AND " + key + " = '" + escapeString(value.toString()) + "' ";
             }
             else {
               console.error(new Error(tableName+ " "+key+ " not a "+paramData.js_type+" "+value).stack)
@@ -126,7 +147,7 @@ function GenerateWhereObj(tableName,tableSchema,whereObjOrRawSQL,AND){
               console.error(e.stack);
               value = '';
             }
-            where_CLAUSE += " AND " + key + " = '" + utilityFunctions.escapeApostrophes(value) + "' ";
+            where_CLAUSE += " AND " + key + " = '" + escapeString(value) + "' ";
             break;
         }
       });

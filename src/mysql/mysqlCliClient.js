@@ -2,9 +2,10 @@ var ConnectionUrlParser = require('../ConnectionUrlParser.js')
 var exec = require('child_process').execSync
 var mysql = require('mysql')
 var Q = require('q')
-var query = process.argv[3]
+var fs = require('fs')
 var connectionString = process.argv[2]
-
+var syncInputDataFile = __dirname+"/input/sync.log"
+var query = fs.readFileSync(syncInputDataFile,{encoding:'utf8'})
 // mysql://root:@127.0.0.1:3306/test;
 
 //select ist.table_name, group_concat( concat('{ column_name:"', isc.column_name,'", data_type:"', isc.data_type,'" column_key:"', isc.column_key,'"}') ) from information_schema.tables ist join information_schema.columns isc on isc.table_name = ist.table_name where ist.TABLE_SCHEMA = 'test' group by ist.table_name;
@@ -24,7 +25,6 @@ Q.fcall(function(){
 })
 .then(function(dataOrig){
   dataOrig = dataOrig instanceof Array ? (dataOrig[0]||[]) : []
-  // console.log("dataOrig",dataOrig)
   var data = { rows: [], columns: {} }
   try {
     var keys = Object.keys(dataOrig[0])
@@ -55,12 +55,14 @@ Q.fcall(function(){
       }
       data.columns[column] = type;
     }
-
     for( var i = 0; i < dataOrig.length; i++){
       var o = {}
       for( var col = 0; col < keys.length; col++ ){
         var column = keys[col]
         var field = dataOrig[i][column]
+        // if( keys[0] == 'tablename' && keys[1] === 'tableschema' && column === 'tableschema' ){
+        //   field = JSON.parse(field)
+        // }
         o[column] = field;
       }
       if( Object.keys(o).length > 0 ){
@@ -68,8 +70,7 @@ Q.fcall(function(){
       }
     }
   } catch(e){
-    console.error(e.stack)
-    process.exit(1);
+    throw e
   }
   console.log(JSON.stringify(data))
   process.exit(0);

@@ -1,10 +1,14 @@
-var createQuery = require('../../node_modules/mysql/lib/Connection.js').createQuery
+var createQuery = require('mysql/lib/Connection.js').createQuery
 var spawnSync = require('child_process').spawnSync;
 var LexerTokenize = require('sql-parser').lexer.tokenize
 var _ = require('lodash')
 var fs = require('fs')
 var syncOutputDataFile = __dirname+"/output/sync.log"
+var syncInputDataFile = __dirname+"/input/sync.log"
 var outputFD = null
+
+var Iconv  = require('iconv').Iconv
+var iconv = new Iconv( "UTF-8", "UTF-8");
 
 var mysqlSync = {
   connectionString: '',
@@ -62,28 +66,46 @@ var mysqlSync = {
     return queryRaw;
   },
   querySync: function(query){
-    var ret = {};
+    var inRet = { stderr: new Buffer('') };
+    var stdoutData = "";
+    var error = null;
+    var results = { rows: [], columns: {} }
+
     try {
-      fs.writeFileSync(syncOutputDataFile,'')
-      ret = spawnSync("node",[__dirname+"/mysqlCliClient.js",this.connectionString,query],{ env: process.env, maxBuffer: 1e9, stdio: [0,outputFD,'pipe'] })
-
+      fs.writeFileSync(syncInputDataFile,"",{encoding:"utf8"})
+      fs.writeFileSync(syncOutputDataFile,"",{encoding:"utf8"})
+      fs.writeFileSync(syncInputDataFile,query,{encoding:'utf8'});
+      inRet = spawnSync("node",[__dirname+"/mysqlCliClient.js",this.connectionString,syncInputDataFile],{ env: process.env, maxBuffer: 1e9, encoding:'utf8', stdio: [0,outputFD,'pipe'] })
     } catch(e){
-      ret = {error: e}
+      error = e;
     }
-    // console.log("ret",ret)
-    var error = ret.error || ret.stderr.toString('utf8') || null;
-    var results = { rows: [] }
-
-    try{
-      var stdout = fs.readFileSync(syncOutputDataFile,'utf8')
-      fs.writeFileSync(syncOutputDataFile,'')
-      results = JSON.parse(stdout);
-    } catch(e){
-      error = error || e;
+    if( inRet.stderr.toString('utf8').trim().length > 0 ){
+      error = error instanceof Error ? error : new Error(inRet.stderr.toString('utf8').trim())
     }
     if(error){
       this.end();
-      error = error instanceof Error ? error : new Error(error)
+      throw error;
+    }
+
+    try{
+      var buffer = fs.readFileSync(syncOutputDataFile);
+      var result = iconv.convert(buffer).toString("utf8").trim();
+      result = result.replace(/\\u0000/gmi,"")
+      result = result.trim();
+      var re = /\0/g;
+      stdoutData = result.toString().replace(re, "") || JSON.stringify({});
+      var data = JSON.parse( stdoutData );
+      results = data;
+      try { fs.writeFileSync(syncOutputDataFile,'') } catch(e){}
+    }
+    catch(e){
+      error = error !== null ? error : new Error();
+      var message = _.cloneDeep( "QUERY("+ query +") - DATA(" + stdoutData + ") - " + e.stack);
+      error.message += message;
+    }
+
+    if(error){
+      this.end();
       throw error;
     }
     for( var r = 0; r < results.rows.length; r++ ){
@@ -98,8 +120,6 @@ var mysqlSync = {
         }
       }
     }
-    // this.end();
-    // console.log("results.rows",results.rows)
     return results.rows;
   },
   end: function(){

@@ -14,6 +14,7 @@ var debugLog = NODE_ENV !== 'production' && DB_LOG ? utilityFunctions.console.as
 var EXCEPTIONS = require('./Exceptions.js')
 var GenerateWhereObj = require('./GenerateWhereObj.js')
 var getTableSchemaDataMap = require('./getTableSchemaDataMap.js')
+var getDateForZone = utilityFunctions.getDateForZone
 
 
 var AbstractTable = function(tablename,databaseName,databaseAddress,databasePassword,databasePort,databaseUser,Client,databaseProtocol,setSqlSchemaCache){
@@ -48,6 +49,13 @@ var AbstractTable = function(tablename,databaseName,databaseAddress,databasePass
   this.abstractTablePrimaryKey = (_(this.abstractTableTableSchema).chain().filter(function(s){ return s.is_primary_key }).compact().head().value() || {}).column_name || null
   this.initializeTable.bind(this)();
   this.exceptions = EXCEPTIONS[this.databaseProtocol]
+
+  var escapeString = ( this.databaseProtocol === 'mysql' || this.databaseProtocol === 'memsql' ) ? utilityFunctions.escapeMySQLString : utilityFunctions.escapeApostrophes;
+  if( typeof escapeString === 'undefined' ){
+    var e = new Error("escapeString")
+    console.error(e.stack)
+  }
+  this.escapeString = escapeString.bind(this)
   createDynamicSearchByPrimaryKeyOrForeignKeyIdPrototypes(this.abstractTableTableSchema);
 };
 
@@ -145,8 +153,8 @@ AbstractTable.prototype.selectWhere = function(selectWhereParams,whereObjOrRawSQ
   return this.select(selectWhereParams).where(whereObjOrRawSQL);
 };
 
-function externalJoinHelper(obj,schema){
-  // console.log("JOIN ON",obj)
+AbstractTable.prototype.externalJoinHelper = function(obj,schema){
+  var self = this;
   var schemaData = getTableSchemaDataMap(obj,schema)
   var keys = schemaData.columnNames;
   var paramsData = schemaData.paramsData;
@@ -161,8 +169,13 @@ function externalJoinHelper(obj,schema){
       onCondition += " AND "+key+" "+value.condition+" ";
       return;
     }
-    if( typeof value === 'boolean' ){
+    if( typeof value === 'boolean' && self.databaseProtocol == 'postgresql' ){
       onCondition += " AND "+key+" IS "+value+"  ";
+      return;
+    }
+    if( typeof value === 'boolean' && ( self.databaseProtocol == 'memsql' || self.databaseProtocol == 'mysql' ) ){
+      var value_uint = value ? "1" : "0";
+      onCondition += " AND "+key+" = "+value_uint+"  ";
       return;
     }
     if( typeof value === 'number' ){
@@ -207,7 +220,7 @@ AbstractTable.prototype.join = function(tablesToJoinOnObjs){
           return " AND "+alias+"."+joinOnColumnsOrObj+" = " +thisTableName+"."+joinOnColumnsOrObj+" ";
         }
         if( joinOnColumnsOrObj instanceof Object && _.keys(joinOnColumnsOrObj).length >= 1 ){
-          return externalJoinHelper(joinOnColumnsOrObj,schema);
+          return self.externalJoinHelper.bind(self)(joinOnColumnsOrObj,schema);
         }
         return null;
       }).compact().value();
@@ -237,7 +250,9 @@ AbstractTable.prototype.insert = function(optionalParams){
 };
 
 
+
 AbstractTable.prototype.getTableSchemaDataMap = getTableSchemaDataMap
+
 AbstractTable.prototype.values = function(params){
   var self = this;
 
@@ -280,7 +295,7 @@ AbstractTable.prototype.values = function(params){
           }
           pgFunctionInputs = _.map(values,function(val){
             if ( typeof val === 'string' )
-              return "'" + utilityFunctions.escapeApostrophes(val) + "'";
+              return "'" + self.escapeString(val) + "'";
             else
               return val;
           });
@@ -289,19 +304,20 @@ AbstractTable.prototype.values = function(params){
           break;
         case  ( paramData.js_type === 'object' && (value instanceof Object || value instanceof Array ) ):
           ofTypeColumn = 'object';
-          value = utilityFunctions.escapeApostrophes( JSON.stringify(value) );
+          value = self.escapeString( JSON.stringify(value) );
           break;
-        case ( paramData.js_type === 'time' && ( value instanceof Date ) ):
-          ofTypeColumn = 'date';
+        case ( paramData.js_type === 'time' && ( new Date(value) instanceof Date ) ):
+          value = getDateForZone(value)
+          ofTypeColumn = 'time';
           break;
         case ( paramData.js_type === 'date' && ( new Date(value) instanceof Date) ):
-          value = new Date(value);
+          value = getDateForZone(value)
           ofTypeColumn = 'date';
           break;
         case ( paramData.js_type === 'number' && !isNaN(parseInt(value)) ):
           ofTypeColumn = 'num' ;
           break;
-        case ( paramData.js_type === 'boolean'  ):
+        case ( paramData.js_type === 'boolean'   || (paramData.js_type === 'number' && typeof value === 'boolean') ):
           ofTypeColumn = 'bool';
           break;
         case ( paramData.js_type === 'string' ):
@@ -309,12 +325,12 @@ AbstractTable.prototype.values = function(params){
           if( value !== null && typeof value !== 'undefined' && typeof value != 'string' && value.toString() ){
             value = value.toString()
           }
-          value = utilityFunctions.escapeApostrophes(value);
+          value = self.escapeString(value);
           break;
         default:
           try {
             value = value.toString();
-            value = utilityFunctions.escapeApostrophes(value);
+            value = self.escapeString(value);
             ofTypeColumn = 'text';
           } catch(e){
             console.error(e.stack)
@@ -325,16 +341,38 @@ AbstractTable.prototype.values = function(params){
       //debugLog("INSERT VALUES => type="+ofTypeColumn+" , value="+value+", column_name="+key);
       switch(ofTypeColumn){
         case 'date':
+          var cast = "::DATE";
+          if( self.databaseProtocol == 'memsql' || self.databaseProtocol == 'mysql'){
+            cast = "";
+          }
           columnNames.push(key);
-          fieldValue = value.toISOString();
-          selectValuesAs.push(" '"+fieldValue+"'::TIMESTAMP as "+key+" ");
-          queryParams += " AND " + key + " IS " + fieldValue + " ";
+          fieldValue = value
+          selectValuesAs.push(" '"+fieldValue+"'"+cast+" as "+key+" ");
+          queryParams += " AND " + key + " = " + fieldValue + ""+cast+" ";
+          break;
+        case 'time':
+          var cast = "::TIMESTAMP";
+          if( self.databaseProtocol == 'memsql' || self.databaseProtocol == 'mysql'){
+            cast = "";
+          }
+          columnNames.push(key);
+          fieldValue = value
+          selectValuesAs.push(" '"+fieldValue+"'"+cast+" as "+key+" ");
+          queryParams += " AND " + key + " = " + fieldValue + ""+cast+" ";
           break;
         case 'bool':
-          columnNames.push(key);
-          fieldValue = value ? "TRUE" : "FALSE";
-          selectValuesAs.push(" "+fieldValue+" as " + key+" ");
-          queryParams += " AND " + key + " IS " + fieldValue + " ";
+          if ( self.databaseProtocol == 'memsql' || self.databaseProtocol == 'mysql' ) {
+            columnNames.push(key);
+            fieldValue = value ? "1" : "0";
+            selectValuesAs.push(" "+fieldValue+" as " + key+" ");
+            queryParams += " AND " + key + " = " + fieldValue + " ";
+          }
+          else {
+            columnNames.push(key);
+            fieldValue = value ? "TRUE" : "FALSE";
+            selectValuesAs.push(" "+fieldValue+" as " + key+" ");
+            queryParams += " AND " + key + " IS " + fieldValue + " ";
+          }
           break;
         case 'num':
           columnNames.push(key);
@@ -449,7 +487,7 @@ AbstractTable.prototype.set = function(updateObjOrRawSQL){
     _.forEach(updateObjOrRawSQL,function(value,key){
 
       var paramData = columnNamesData[key] || {}
-
+      /** LEAVE THE SPACE COMMA SPACE IN THE SQL+= CONCATENATION!!! **/
       switch (true) {
         case ( _.isNull(value) || _.isUndefined(value) ):
           sql +=  key + " = NULL " + " , ";
@@ -458,37 +496,53 @@ AbstractTable.prototype.set = function(updateObjOrRawSQL){
           sql += key + " "+ value.condition + " , ";
           break;
         case (  paramData.js_type === 'date'   ):
+          var cast = "::DATE";
+          if( self.databaseProtocol == 'memsql' || self.databaseProtocol == 'mysql'){
+            cast = "";
+          }
           if(value instanceof Date && value != "Invalid Date"){
-            sql += key + " = '"+ value.toISOString() + "'::DATE , ";
+            var dateValue = getDateForZone(value)
+            sql += key + " = '"+ dateValue + "'"+cast+" , ";
           }
           else if (typeof value === 'string' && new Date(value) != "Invalid Date" ){
-            value = new Date(value)
-            sql += key + " = '"+ value.toISOString() + "'::DATE , ";
+            var dateValue = getDateForZone(value)
+            sql += key + " = '"+ dateValue + "'"+cast+" , ";
           } else {
             console.error(new Error(self.abstractTableTableName+ " "+key+ " invalid  " + paramData.js_type + " " + value).stack)
           }
           break;
         case (  paramData.js_type === 'time'   ):
+          var cast = "::TIMESTAMP";
+          if( self.databaseProtocol == 'memsql' || self.databaseProtocol == 'mysql'){
+            cast = "";
+          }
           if(value instanceof Date && value != "Invalid Date"){
-            sql += key + " = '"+ value.toISOString() + "'::TIMESTAMP , ";
+            var dateValue = getDateForZone(value)
+            sql += key + " = '"+ dateValue+ "'"+cast+" , ";
           }
           else if (typeof value === 'string' && new Date(value) != "Invalid Date" ){
-            value = new Date(value)
-            sql += key + " = '"+ value.toISOString() + "'::TIMESTAMP , ";
+            var dateValue = getDateForZone(value)
+            sql += key + " = '"+ dateValue + "'"+cast+" , ";
           }
           else {
             console.error(new Error(self.abstractTableTableName+ " "+key+ " invalid  " + paramData.js_type + " " + value).stack)
           }
           break;
         case( paramData.js_type === 'boolean' ):
-          if( typeof value === 'boolean' ) {
+          if( typeof value === 'boolean' && ( self.databaseProtocol == 'memsql' || self.databaseProtocol == 'mysql' ) ) {
+            var value_uint = value ? "1" : "0"
+            sql += key + " = " + value_uint + " , ";
+          }
+          else if ( typeof value === 'boolean' && ( self.databaseProtocol == 'postgresql' ) ) {
             sql += key + " = " + value + " , ";
-          } else {
+          }
+          else {
             console.error(new Error(self.abstractTableTableName+ " "+key+ " invalid  " + paramData.js_type + " " + value).stack)
           }
           break;
-
         case ( paramData.js_type === 'number' ):
+          if( value === true ) value = 1;
+          if( value === false ) value = 0;
           if( ! isNaN( parseInt(value) ) ){
               sql += key + " = "+ value + " , ";
           } else {
@@ -498,11 +552,11 @@ AbstractTable.prototype.set = function(updateObjOrRawSQL){
         case ( paramData.js_type === 'object' ):
           if( (value instanceof Object || value instanceof Array) ){
               value = JSON.stringify(value)
-              value = utilityFunctions.escapeApostrophes(value)
+              value = self.escapeString(value)
               sql += key + " = " + " '"+value+"' " + " , ";
           }
           else if( typeof value === 'string' ){
-            value = utilityFunctions.escapeApostrophes(value)
+            value = self.escapeString(value)
             sql += key + " = " + " '"+value+"' " + " , ";
           } else {
             console.error(new Error(self.abstractTableTableName+ " "+key+ " invalid  " + paramData.js_type + " " + value).stack)
@@ -510,11 +564,11 @@ AbstractTable.prototype.set = function(updateObjOrRawSQL){
           break;
         case ( paramData.js_type === 'string' ):
           if( typeof value === 'string' ){
-              value = utilityFunctions.escapeApostrophes(value)
+              value = self.escapeString(value)
               sql += key + " = " + " '"+value+"' " + " , ";
           }
           else if ( value != null && typeof value !== 'undefined' && typeof value.toString == 'function' && value.toString() ) {
-            value = utilityFunctions.escapeApostrophes(value.toString())
+            value = self.escapeString(value.toString())
             sql += key + " = " + " '"+value+"' " + " , ";
           }
           else {
@@ -528,7 +582,7 @@ AbstractTable.prototype.set = function(updateObjOrRawSQL){
             console.error(e.stack);
             value = '';
           }
-          sql += key + " = " + " '"+utilityFunctions.escapeApostrophes(value)+"' " + " , ";
+          sql += key + " = " + " '"+self.escapeString(value)+"' " + " , ";
           break;
       }
     });
@@ -551,7 +605,7 @@ AbstractTable.prototype.deleteFrom = function(){
 
 AbstractTable.prototype.and = function(whereObjOrRawSQL){
   var self = this;
-  var generatedWhereClause = new GenerateWhereObj(self.abstractTableTableName,self.abstractTableTableSchema,whereObjOrRawSQL,true);
+  var generatedWhereClause = new GenerateWhereObj(self.abstractTableTableName,self.abstractTableTableSchema,whereObjOrRawSQL,true,self.databaseProtocol);
   var whereQueryGenerated = generatedWhereClause.getWhere();
   //console.log("whereQueryGenerated",whereQueryGenerated)
   this.abstractTableWhere += ' '+whereQueryGenerated+' '
@@ -568,7 +622,7 @@ AbstractTable.prototype.where = function(whereObjOrRawSQL){
   if( ! whereObjOrRawSQL ){
     this.primaryKeyLkup = false;
   }
-  var generatedWhereClause = new GenerateWhereObj(self.abstractTableTableName,self.abstractTableTableSchema,whereObjOrRawSQL);
+  var generatedWhereClause = new GenerateWhereObj(self.abstractTableTableName,self.abstractTableTableSchema,whereObjOrRawSQL,undefined,self.databaseProtocol);
   var whereQueryGenerated = generatedWhereClause.getWhere();
   //console.log("whereQueryGenerated",whereQueryGenerated);
   if( typeof whereQueryGenerated === 'string' && whereQueryGenerated.length > 7 && this.deleting ){ // unlocking delete safety
@@ -632,8 +686,12 @@ AbstractTable.prototype.AndExists = function(tableNameExists,onColumnIds,whereEx
     whereExistsObjOrSQL = null;
 
   }
-
-  var whereQuery = whereExistsObjOrSQL ? ( new GenerateWhereObj(self.abstractTableTableName,self.abstractTableTableSchema,whereExistsObjOrSQL) ).getWhere() : ' WHERE TRUE ';
+  var getWhereGenerateWhereObj = "";
+  if( whereExistsObjOrSQL ){
+    var genWhereObj = new GenerateWhereObj(self.abstractTableTableName,self.abstractTableTableSchema,whereExistsObjOrSQL,undefined,self.databaseProtocol)
+    getWhereGenerateWhereObj = genWhereObj.getWhere()
+  }
+  var whereQuery = whereExistsObjOrSQL ? getWhereGenerateWhereObj : ' WHERE TRUE ';
   var mainTableName = this.abstractTableTableName;
   var whereOnColumnIdsAnd = onColumnIds.length > 0 ? " AND " : " ";
   whereQuery =  "AND "+NOT+" EXISTS (select 1 from "+tableNameExists+ " "+tableNameExists+" "+
@@ -995,7 +1053,6 @@ AbstractTable.prototype.upsertUsingColumnValues = function(setParams,whereParams
 
   return q.promise;
 };
-
 
 
 
